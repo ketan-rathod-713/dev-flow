@@ -1,0 +1,19 @@
+name: "Start Project"
+variables:
+  PROJECT_PATH: "/home/Desktop/backend-monorepo"
+steps:
+  - name: "Start Nomad Agent In Background"
+    command: "tmux new-session -A -d -s nomad-agent 'nomad agent -dev'"
+    notes: "Start the Nomad agent in a new tmux session."
+    skip_prompt: false
+    terminal: false
+  - name: "Checkout Nomad Logs"
+    command: "tmux attach-session -t nomad-agent"
+    notes: "Checkout Nomad logs in a new tmux window."
+    skip_prompt: false
+    terminal: true
+  - name: "Start Nomad Job"
+    command: "nomad job run $PROJECT_PATH/documents/nomad/minio.hcl"
+    notes: "Start the Nomad job in a new tmux window."
+    skip_prompt: false
+    terminal: true

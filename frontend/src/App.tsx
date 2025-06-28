@@ -1,4 +1,3 @@
-import React from 'react';
 import FlowsPage from './pages/FlowsPage';
 
 function App() {
