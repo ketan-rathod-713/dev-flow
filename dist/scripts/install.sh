@@ -59,17 +59,21 @@ mkdir -p "$INSTALL_DIR"/{bin,config,data/{flows,logs},web,tmp}
 
 # Copy files
 print_status "Installing binary and assets..."
-if [ -f "bin/dev-tool" ]; then
-    cp bin/dev-tool "$INSTALL_DIR/bin/"
+if [ -f "../bin/dev-tool" ]; then
+    cp ../bin/dev-tool "$INSTALL_DIR/bin/"
     chmod +x "$INSTALL_DIR/bin/dev-tool"
 else
     print_error "Binary not found! Make sure you've run the build script first."
+    print_error "Looking for binary at: $(pwd)/../bin/dev-tool"
+    print_error "Current directory: $(pwd)"
+    print_error "Directory contents:"
+    ls -la ../ || true
     exit 1
 fi
 
 # Copy configuration
-if [ -f "$CONFIG_FILE" ]; then
-    cp "$CONFIG_FILE" "$INSTALL_DIR/config/"
+if [ -f "../config.yaml" ]; then
+    cp "../config.yaml" "$INSTALL_DIR/config/"
 else
     print_warning "Configuration file not found, creating default..."
     cat >"$INSTALL_DIR/config/config.yaml" <<'EOF'
@@ -95,8 +99,8 @@ EOF
 fi
 
 # Copy web assets
-if [ -d "web" ]; then
-    cp -r web/* "$INSTALL_DIR/web/"
+if [ -d "../web" ]; then
+    cp -r ../web/* "$INSTALL_DIR/web/"
 else
     print_warning "Web assets not found, creating placeholder..."
     mkdir -p "$INSTALL_DIR/web"
@@ -104,8 +108,8 @@ else
 fi
 
 # Copy sample flows
-if [ -d "flows" ]; then
-    cp -r flows/* "$INSTALL_DIR/data/flows/"
+if [ -d "../flows" ]; then
+    cp -r ../flows/* "$INSTALL_DIR/data/flows/"
 else
     print_status "Creating sample flow..."
     mkdir -p "$INSTALL_DIR/data/flows"
