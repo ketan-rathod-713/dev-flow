@@ -39,6 +39,7 @@ type Step struct {
 	Command    string `yaml:"command" json:"command"`
 	Notes      string `yaml:"notes,omitempty" json:"notes,omitempty"`
 	SkipPrompt bool   `yaml:"skip_prompt,omitempty" json:"skip_prompt,omitempty"`
+	Terminal   bool   `yaml:"terminal" json:"terminal"`
 }
 
 type Flow struct {

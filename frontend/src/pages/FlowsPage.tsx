@@ -23,6 +23,7 @@ type Step = {
     command: string;
     notes?: string;
     skip_prompt?: boolean;
+    terminal?: boolean;
 };
 
 type Flow = {
@@ -199,7 +200,7 @@ const FlowsPage: React.FC = () => {
                                     </div>
                                 </CardHeader>
                                 <CardContent className="p-6">
-                                    <ScrollArea className="max-h-96">
+                                    <ScrollArea className="max-h-96 overflow-y-auto">
                                         <div className="space-y-4">
                                             {flow.steps.map((step, stepIdx) => {
                                                 const isExecuting = executingStep?.flowIdx === flowIdx && executingStep?.stepIdx === stepIdx;
@@ -246,50 +247,55 @@ const FlowsPage: React.FC = () => {
                                                                     </div>
 
                                                                     <div className="ml-4 relative gap-2 flex items-center">
-                                                                        <Button
-                                                                            onClick={() => handleRunStep(flowIdx, stepIdx)}
-                                                                            disabled={showTerminal || isExecuting}
-                                                                            className={cn(
-                                                                                "bg-blue-600 hover:bg-blue-700 text-white shadow-md",
-                                                                                "disabled:opacity-50 disabled:cursor-not-allowed",
-                                                                                "group-hover:shadow-lg transition-all duration-200",
-                                                                                "flex items-center gap-2"
-                                                                            )}
-                                                                        >
-                                                                            {isExecuting ? (
-                                                                                <>
-                                                                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                                                                    Executing...
-                                                                                </>
-                                                                            ) : (
-                                                                                <>
-                                                                                    <Play className="h-4 w-4" />
-                                                                                    Open Terminal
-                                                                                </>
-                                                                            )}
-                                                                        </Button>
-                                                                        <Button
-                                                                            onClick={() => handleExecuteStep(flowIdx, stepIdx)}
-                                                                            disabled={showTerminal || isExecuting}
-                                                                            className={cn(
-                                                                                "bg-blue-600 hover:bg-blue-700 text-white shadow-md",
-                                                                                "disabled:opacity-50 disabled:cursor-not-allowed",
-                                                                                "group-hover:shadow-lg transition-all duration-200",
-                                                                                "flex items-center gap-2"
-                                                                            )}
-                                                                        >
-                                                                            {isExecuting ? (
-                                                                                <>
-                                                                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                                                                    Executing...
-                                                                                </>
-                                                                            ) : (
-                                                                                <>
-                                                                                    <Play className="h-4 w-4" />
-                                                                                    Execute & Show Result
-                                                                                </>
-                                                                            )}
-                                                                        </Button>
+                                                                        {
+                                                                            step.terminal && <Button
+                                                                                onClick={() => handleRunStep(flowIdx, stepIdx)}
+                                                                                disabled={showTerminal || isExecuting}
+                                                                                className={cn(
+                                                                                    "bg-blue-600 hover:bg-blue-700 text-white shadow-md",
+                                                                                    "disabled:opacity-50 disabled:cursor-not-allowed",
+                                                                                    "group-hover:shadow-lg transition-all duration-200",
+                                                                                    "flex items-center gap-2"
+                                                                                )}
+                                                                            >
+                                                                                {isExecuting ? (
+                                                                                    <>
+                                                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                                                        Executing...
+                                                                                    </>
+                                                                                ) : (
+                                                                                    <>
+                                                                                        <Play className="h-4 w-4" />
+                                                                                        Open Terminal
+                                                                                    </>
+                                                                                )}
+                                                                            </Button>
+                                                                        }
+                                                                        {
+                                                                            !step.terminal &&
+                                                                            <Button
+                                                                                onClick={() => handleExecuteStep(flowIdx, stepIdx)}
+                                                                                disabled={showTerminal || isExecuting}
+                                                                                className={cn(
+                                                                                    "bg-blue-600 hover:bg-blue-700 text-white shadow-md",
+                                                                                    "disabled:opacity-50 disabled:cursor-not-allowed",
+                                                                                    "group-hover:shadow-lg transition-all duration-200",
+                                                                                    "flex items-center gap-2"
+                                                                                )}
+                                                                            >
+                                                                                {isExecuting ? (
+                                                                                    <>
+                                                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                                                        Executing...
+                                                                                    </>
+                                                                                ) : (
+                                                                                    <>
+                                                                                        <Play className="h-4 w-4" />
+                                                                                        Execute & Show Result
+                                                                                    </>
+                                                                                )}
+                                                                            </Button>
+                                                                        }
 
 
                                                                     </div>
