@@ -1,0 +1,24 @@
+name: "Sample Development Flow"
+variables:
+  PROJECT_PATH: "/home/user/myproject"
+steps:
+  - name: "Check Current Directory"
+    command: "pwd && ls -la"
+    notes: "Display current working directory and list files. This is safe to run anywhere."
+    skip_prompt: false
+  - name: "System Information"
+    command: "uname -a && whoami"
+    notes: "Show system information and current user. Good for quick system check."
+    skip_prompt: false
+  - name: "Test Echo Command"
+    command: "echo 'Hello from DevFlow!' && echo 'Current time:' && date"
+    notes: "Simple echo test with timestamp. Safe command for testing."
+    skip_prompt: true
+  - name: "Check Disk Usage"
+    command: "df -h | head -5"
+    notes: "Display disk usage for mounted filesystems. Read-only operation."
+    skip_prompt: false
+  - name: "Network Test"
+    command: "ping -c 3 google.com"
+    notes: "Test network connectivity with 3 ping packets to Google."
+    skip_prompt: false
