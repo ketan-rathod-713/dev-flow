@@ -4,8 +4,8 @@ set -e
 # Configuration
 SERVICE_NAME="dev-tool"
 INSTALL_DIR="/opt/dev-tool"
-USER="devtool"
-GROUP="devtool"
+USER="bacancy"
+GROUP="bacancy"
 CONFIG_FILE="config.yaml"
 
 # Colors for output
@@ -80,7 +80,7 @@ else
 service:
   name: "dev-tool"
   version: "1.0.0"
-  port: 8080
+  port: 24050
   host: "0.0.0.0"
 data:
   base_dir: "/opt/dev-tool/data"
@@ -194,7 +194,7 @@ if systemctl is-active --quiet "$SERVICE_NAME"; then
     print_success "🎉 Installation completed successfully!"
     echo ""
     echo "📍 Service Status: $(systemctl is-active $SERVICE_NAME)"
-    echo "🌐 Web Interface: http://localhost:8080"
+    echo "🌐 Web Interface: http://localhost:24050"
     echo "📂 Data Directory: $INSTALL_DIR/data"
     echo "⚙️  Configuration: $INSTALL_DIR/config/config.yaml"
     echo ""

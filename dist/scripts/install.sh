@@ -4,8 +4,8 @@ set -e
 # Configuration
 SERVICE_NAME="dev-tool"
 INSTALL_DIR="/opt/dev-tool"
-USER="devtool"
-GROUP="devtool"
+USER="bacancy"
+GROUP="bacancy"
 CONFIG_FILE="config.yaml"
 
 # Colors for output
@@ -59,12 +59,12 @@ mkdir -p "$INSTALL_DIR"/{bin,config,data/{flows,logs},web,tmp}
 
 # Copy files
 print_status "Installing binary and assets..."
-if [ -f "../bin/dev-tool" ]; then
-    cp ../bin/dev-tool "$INSTALL_DIR/bin/"
+if [ -f "./dist/bin/dev-tool" ]; then
+    cp ./dist/bin/dev-tool "$INSTALL_DIR/bin/"
     chmod +x "$INSTALL_DIR/bin/dev-tool"
 else
     print_error "Binary not found! Make sure you've run the build script first."
-    print_error "Looking for binary at: $(pwd)/../bin/dev-tool"
+    print_error "Looking for binary at: $(pwd)/dist/bin/dev-tool"
     print_error "Current directory: $(pwd)"
     print_error "Directory contents:"
     ls -la ../ || true
@@ -80,7 +80,7 @@ else
 service:
   name: "dev-tool"
   version: "1.0.0"
-  port: 8080
+  port: 24050
   host: "0.0.0.0"
 data:
   base_dir: "/opt/dev-tool/data"
@@ -99,8 +99,8 @@ EOF
 fi
 
 # Copy web assets
-if [ -d "../web" ]; then
-    cp -r ../web/* "$INSTALL_DIR/web/"
+if [ -d "./dist/web" ]; then
+    cp -r ./dist/web/* "$INSTALL_DIR/web/"
 else
     print_warning "Web assets not found, creating placeholder..."
     mkdir -p "$INSTALL_DIR/web"
@@ -194,7 +194,7 @@ if systemctl is-active --quiet "$SERVICE_NAME"; then
     print_success "🎉 Installation completed successfully!"
     echo ""
     echo "📍 Service Status: $(systemctl is-active $SERVICE_NAME)"
-    echo "🌐 Web Interface: http://localhost:8080"
+    echo "🌐 Web Interface: http://localhost:24050"
     echo "📂 Data Directory: $INSTALL_DIR/data"
     echo "⚙️  Configuration: $INSTALL_DIR/config/config.yaml"
     echo ""

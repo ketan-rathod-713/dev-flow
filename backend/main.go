@@ -211,7 +211,7 @@ func loadConfig(configPath string) (*Config, error) {
 		Service: ServiceConfig{
 			Name:    "dev-tool",
 			Version: version,
-			Port:    8080,
+			Port:    24050,
 			Host:    "0.0.0.0",
 		},
 		Data: DataConfig{
@@ -410,6 +410,11 @@ func handleShellWebSocket(c echo.Context) error {
 	for key, value := range variables {
 		env = append(env, fmt.Sprintf("%s=%s", key, value))
 	}
+
+	env = append(env, "TERM=xterm-256color")
+	env = append(env, "COLORTERM=truecolor")
+	env = append(env, "COLORFGBG=15;0")
+	env = append(env, "HOME=/home/bacancy")
 	cmd.Env = env
 
 	ptmx, err := pty.Start(cmd)
@@ -1011,6 +1016,37 @@ type UpdateVariableRequest struct {
 	Value string `json:"value"`
 }
 
+// Export/Import types
+type ExportFlowResponse struct {
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	Variables   map[string]string `json:"variables"`
+	Steps       []ExportStep      `json:"steps"`
+	ExportedAt  time.Time         `json:"exported_at"`
+	Version     string            `json:"version"`
+}
+
+type ExportStep struct {
+	Name            string `json:"name"`
+	Command         string `json:"command"`
+	Notes           string `json:"notes,omitempty"`
+	SkipPrompt      bool   `json:"skip_prompt"`
+	Terminal        bool   `json:"terminal"`
+	TmuxSessionName string `json:"tmux_session_name,omitempty"`
+	IsTmuxTerminal  bool   `json:"is_tmux_terminal"`
+	OrderIndex      int    `json:"order_index"`
+}
+
+type ImportFlowRequest struct {
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	Variables   map[string]string `json:"variables"`
+	Steps       []ExportStep      `json:"steps"`
+	// Optional fields for validation
+	ExportedAt time.Time `json:"exported_at,omitempty"`
+	Version    string    `json:"version,omitempty"`
+}
+
 // Database operations for editing
 func updateFlow(flowID int, req UpdateFlowRequest) (*FlowDB, error) {
 	tx, err := db.Begin()
@@ -1114,6 +1150,81 @@ func deleteFlow(flowID int) error {
 		return fmt.Errorf("failed to delete flow: %v", err)
 	}
 	return nil
+}
+
+// Export/Import functions
+func exportFlow(flowID int) (*ExportFlowResponse, error) {
+	// Get flow details
+	flow, err := getFlowByID(flowID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get flow: %v", err)
+	}
+
+	// Get flow variables
+	variables, err := getFlowVariables(flowID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get flow variables: %v", err)
+	}
+
+	// Get flow steps
+	steps, err := getFlowSteps(flowID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get flow steps: %v", err)
+	}
+
+	// Convert steps to export format
+	exportSteps := make([]ExportStep, len(steps))
+	for i, step := range steps {
+		exportSteps[i] = ExportStep{
+			Name:            step.Name,
+			Command:         step.Command,
+			Notes:           step.Notes,
+			SkipPrompt:      step.SkipPrompt,
+			Terminal:        step.Terminal,
+			TmuxSessionName: step.TmuxSessionName,
+			IsTmuxTerminal:  step.IsTmuxTerminal,
+			OrderIndex:      i, // Use array index for consistent ordering
+		}
+	}
+
+	return &ExportFlowResponse{
+		Name:        flow.Name,
+		Description: flow.Description,
+		Variables:   variables,
+		Steps:       exportSteps,
+		ExportedAt:  time.Now(),
+		Version:     version,
+	}, nil
+}
+
+func importFlow(req ImportFlowRequest) (*FlowDB, error) {
+	// Validate the import request
+	if req.Name == "" {
+		return nil, fmt.Errorf("flow name is required")
+	}
+
+	// Convert ImportFlowRequest to CreateFlowRequest
+	createReq := CreateFlowRequest{
+		Name:      req.Name,
+		Variables: req.Variables,
+		Steps:     make([]Step, len(req.Steps)),
+	}
+
+	// Convert steps from import format
+	for i, importStep := range req.Steps {
+		createReq.Steps[i] = Step{
+			Name:            importStep.Name,
+			Command:         importStep.Command,
+			Notes:           importStep.Notes,
+			SkipPrompt:      importStep.SkipPrompt,
+			Terminal:        importStep.Terminal,
+			TmuxSessionName: importStep.TmuxSessionName,
+			IsTmuxTerminal:  importStep.IsTmuxTerminal,
+		}
+	}
+
+	// Create the flow
+	return createFlow(createReq)
 }
 
 // New handlers for editing
@@ -1326,6 +1437,88 @@ func handleDeleteVariable(c echo.Context) error {
 	})
 }
 
+// Export/Import handlers
+func handleExportFlow(c echo.Context) error {
+	flowID := c.Param("id")
+	if flowID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Flow ID is required",
+		})
+	}
+
+	id := 0
+	if _, err := fmt.Sscanf(flowID, "%d", &id); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid flow ID",
+		})
+	}
+
+	exportData, err := exportFlow(id)
+	if err != nil {
+		log.Printf("Error exporting flow: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to export flow",
+		})
+	}
+
+	// Set proper headers for file download
+	filename := fmt.Sprintf("%s-flow-export.json", exportData.Name)
+	c.Response().Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	c.Response().Header().Set("Content-Type", "application/json")
+
+	return c.JSON(http.StatusOK, exportData)
+}
+
+func handleImportFlow(c echo.Context) error {
+	var req ImportFlowRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid request payload",
+		})
+	}
+
+	if req.Name == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Flow name is required",
+		})
+	}
+
+	// Check if flow already exists
+	flows, err := getAllFlows()
+	if err != nil {
+		log.Printf("Error checking existing flows: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to check existing flows",
+		})
+	}
+
+	for _, flow := range flows {
+		if flow.Name == req.Name {
+			return c.JSON(http.StatusConflict, map[string]string{
+				"error": fmt.Sprintf("Flow with name '%s' already exists", req.Name),
+			})
+		}
+	}
+
+	flow, err := importFlow(req)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return c.JSON(http.StatusConflict, map[string]string{
+				"error": "Flow with this name already exists",
+			})
+		}
+		log.Printf("Error importing flow: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to import flow",
+		})
+	}
+
+	return c.JSON(http.StatusCreated, map[string]interface{}{
+		"message": "Flow imported successfully",
+		"flow":    flow,
+	})
+}
+
 func main() {
 	// Command line flags
 	var (
@@ -1425,6 +1618,10 @@ func main() {
 	api.DELETE("/steps/:id", handleDeleteStep)
 	api.PUT("/variables/:flowId/:key", handleUpdateVariable)
 	api.DELETE("/variables/:flowId/:key", handleDeleteVariable)
+
+	// Export/Import routes
+	api.GET("/flows/:id/export", handleExportFlow)
+	api.POST("/flows/import", handleImportFlow)
 
 	// Start server
 	address := fmt.Sprintf("%s:%d", config.Service.Host, config.Service.Port)

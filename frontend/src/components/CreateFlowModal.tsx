@@ -95,9 +95,9 @@ const CreateFlowModal: React.FC<CreateFlowModalProps> = ({ isOpen, onClose, onSu
         setSteps(prev => prev.filter((_, i) => i !== index));
     };
 
-    const handleUpdateStep = (index: number, updatedStep: Step) => {
-        setSteps(prev => prev.map((step, i) => i === index ? updatedStep : step));
-    };
+    // const handleUpdateStep = (index: number, updatedStep: Step) => {
+    //     setSteps(prev => prev.map((step, i) => i === index ? updatedStep : step));
+    // };
 
     const handleSubmit = () => {
         if (flowName.trim() && steps.length > 0) {

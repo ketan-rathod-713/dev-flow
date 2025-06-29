@@ -2,7 +2,7 @@
 service:
   name: "dev-tool"
   version: "1.0.0"
-  port: 8080
+  port: 24050
   host: "0.0.0.0"
 # Data directories (will be set during installation)
 data:

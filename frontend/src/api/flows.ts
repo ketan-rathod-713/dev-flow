@@ -1,7 +1,27 @@
+const API_BASE = 'http://localhost:24050/api'
+
+export interface ImportFlowRequest {
+  name: string
+  description?: string
+  variables: { [key: string]: string }
+  steps: Array<{
+    name: string
+    command: string
+    notes?: string
+    skip_prompt?: boolean
+    terminal: boolean
+    tmux_session_name?: string
+    is_tmux_terminal?: boolean
+    order_index: number
+  }>
+  exported_at?: string
+  version?: string
+}
+
 export const fetchFlows = async () => {
   console.log('fetchFlows API called')
 
-  const response = await fetch('http://localhost:8080/api/flows')
+  const response = await fetch(`${API_BASE}/flows`)
 
   console.log('Fetch flows API response status:', response.status)
 
@@ -67,7 +87,7 @@ export interface UpdateVariableRequest {
 export const createFlow = async (flowData: CreateFlowRequest) => {
   console.log('createFlow API called with data:', flowData)
 
-  const response = await fetch('http://localhost:8080/api/flows', {
+  const response = await fetch(`${API_BASE}/flows`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -94,7 +114,7 @@ export const updateFlow = async (
 ) => {
   console.log('updateFlow API called with data:', { flowId, flowData })
 
-  const response = await fetch(`http://localhost:8080/api/flows/${flowId}`, {
+  const response = await fetch(`${API_BASE}/flows/${flowId}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json'
@@ -118,7 +138,7 @@ export const updateFlow = async (
 export const deleteFlow = async (flowId: number) => {
   console.log('deleteFlow API called with flowId:', flowId)
 
-  const response = await fetch(`http://localhost:8080/api/flows/${flowId}`, {
+  const response = await fetch(`${API_BASE}/flows/${flowId}`, {
     method: 'DELETE'
   })
 
@@ -141,7 +161,7 @@ export const updateStep = async (
 ) => {
   console.log('updateStep API called with data:', { stepId, stepData })
 
-  const response = await fetch(`http://localhost:8080/api/steps/${stepId}`, {
+  const response = await fetch(`${API_BASE}/steps/${stepId}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json'
@@ -165,7 +185,7 @@ export const updateStep = async (
 export const createStep = async (stepData: CreateStepRequest) => {
   console.log('createStep API called with data:', stepData)
 
-  const response = await fetch('http://localhost:8080/api/steps', {
+  const response = await fetch(`${API_BASE}/steps`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -189,7 +209,7 @@ export const createStep = async (stepData: CreateStepRequest) => {
 export const deleteStep = async (stepId: number) => {
   console.log('deleteStep API called with stepId:', stepId)
 
-  const response = await fetch(`http://localhost:8080/api/steps/${stepId}`, {
+  const response = await fetch(`${API_BASE}/steps/${stepId}`, {
     method: 'DELETE'
   })
 
@@ -217,16 +237,13 @@ export const updateVariable = async (
     variableData
   })
 
-  const response = await fetch(
-    `http://localhost:8080/api/variables/${flowId}/${key}`,
-    {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(variableData)
-    }
-  )
+  const response = await fetch(`${API_BASE}/variables/${flowId}/${key}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(variableData)
+  })
 
   console.log('Update variable API response status:', response.status)
 
@@ -244,30 +261,25 @@ export const updateVariable = async (
 export const deleteVariable = async (flowId: number, key: string) => {
   console.log('deleteVariable API called with data:', { flowId, key })
 
-  const response = await fetch(
-    `http://localhost:8080/api/variables/${flowId}/${key}`,
-    {
-      method: 'DELETE'
-    }
-  )
+  const response = await fetch(`${API_BASE}/variables/${flowId}/${key}`, {
+    method: 'DELETE'
+  })
 
   console.log('Delete variable API response status:', response.status)
 
   if (!response.ok) {
-    const errorText = await response.text()
-    console.error('Delete variable API error:', errorText)
-    throw new Error(`Failed to delete variable: ${errorText}`)
+    const error = await response.json()
+    console.error('Delete variable API error:', error)
+    throw new Error(error.error || 'Failed to delete variable')
   }
 
-  const result = await response.json()
-  console.log('Delete variable API response data:', result)
-  return result
+  return response.json()
 }
 
 export const executeStep = async (stepId: number) => {
   console.log('executeStep API called with stepId:', stepId)
 
-  const response = await fetch('http://localhost:8080/api/execute-step', {
+  const response = await fetch(`${API_BASE}/execute-step`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -286,4 +298,33 @@ export const executeStep = async (stepId: number) => {
   const result = await response.json()
   console.log('Execute step API response data:', result)
   return result
+}
+
+// Export/Import functions
+export const exportFlow = async (flowId: number): Promise<Blob> => {
+  const response = await fetch(`${API_BASE}/flows/${flowId}/export`)
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.error || 'Failed to export flow')
+  }
+
+  return response.blob()
+}
+
+export const importFlow = async (flowData: ImportFlowRequest) => {
+  const response = await fetch(`${API_BASE}/flows/import`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(flowData)
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.error || 'Failed to import flow')
+  }
+
+  return response.json()
 }

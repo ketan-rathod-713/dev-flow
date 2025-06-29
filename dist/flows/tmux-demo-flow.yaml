@@ -1,0 +1,42 @@
+name: "Tmux Terminal Demo Flow"
+variables:
+  PROJECT_NAME: "my-project"
+  SESSION_NAME: "dev-session"
+steps:
+  - name: "Regular Terminal Step"
+    command: "echo 'This runs in a regular terminal'"
+    notes: "This step opens a regular terminal window"
+    skip_prompt: false
+    terminal: true
+    is_tmux_terminal: false
+  - name: "Tmux Terminal Step"
+    command: "echo 'This runs in a tmux session: ${SESSION_NAME}'"
+    notes: "This step creates/uses a tmux session for terminal operations"
+    skip_prompt: false
+    terminal: true
+    tmux_session_name: "${SESSION_NAME}"
+    is_tmux_terminal: true
+  - name: "Command Step"
+    command: "echo 'Project: ${PROJECT_NAME}' && date"
+    notes: "This is a regular command step that shows output in a modal"
+    skip_prompt: false
+    terminal: false
+  - name: "Another Tmux Step"
+    command: "cd /tmp && ls -la"
+    notes: "Another tmux step that runs in the same session"
+    skip_prompt: false
+    terminal: true
+    tmux_session_name: "${SESSION_NAME}"
+    is_tmux_terminal: true
+  - name: "Tmux Different Session"
+    command: "htop"
+    notes: "This creates a different tmux session for monitoring"
+    skip_prompt: false
+    terminal: true
+    tmux_session_name: "monitoring"
+    is_tmux_terminal: true
+  - name: "Final Command"
+    command: "echo 'Flow completed for project: ${PROJECT_NAME}'"
+    notes: "Final step to show completion"
+    skip_prompt: true
+    terminal: false

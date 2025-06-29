@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { fetchFlows, createFlow, deleteFlow } from '../api/flows';
+import { Link } from 'react-router-dom';
+import { fetchFlows, createFlow, deleteFlow, exportFlow, importFlow } from '../api/flows';
 import type { CreateFlowRequest } from '../api/flows';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -18,9 +19,12 @@ import {
     Code,
     Edit3,
     Trash2,
-    AlertCircle
+    AlertCircle,
+    CheckCircle,
+    Download,
+    Upload,
+    Plus
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
 
 type Step = {
     id?: number;
@@ -48,6 +52,10 @@ const FlowsPage: React.FC = () => {
     const [showEditModal, setShowEditModal] = useState(false);
     const [editingFlow, setEditingFlow] = useState<Flow | null>(null);
     const [deletingFlowId, setDeletingFlowId] = useState<number | null>(null);
+    const [exportingFlowId, setExportingFlowId] = useState<number | null>(null);
+    const [importFile, setImportFile] = useState<File | null>(null);
+    const [importing, setImporting] = useState(false);
+    const [importSuccess, setImportSuccess] = useState<string | null>(null);
 
     useEffect(() => {
         fetchFlows()
@@ -133,6 +141,68 @@ const FlowsPage: React.FC = () => {
         }
     };
 
+    const handleExportFlow = async (flowId: number, flowName: string) => {
+        try {
+            setExportingFlowId(flowId);
+            const blob = await exportFlow(flowId);
+
+            // Create download link
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${flowName}-flow-export.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+
+            console.log(`Flow ${flowName} exported successfully`);
+        } catch (error) {
+            console.error('Failed to export flow:', error);
+            setError(error instanceof Error ? error.message : 'Failed to export flow');
+        } finally {
+            setExportingFlowId(null);
+        }
+    };
+
+    const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file && file.type === 'application/json') {
+            setImportFile(file);
+            setImportSuccess(null);
+        } else {
+            setError('Please select a valid JSON file');
+        }
+    };
+
+    const handleImportFlow = async () => {
+        if (!importFile) return;
+
+        try {
+            setImporting(true);
+            setError(null);
+
+            const fileContent = await importFile.text();
+            const flowData = JSON.parse(fileContent);
+
+            const result = await importFlow(flowData);
+            setImportSuccess(result.message);
+
+            // Refresh flows list
+            await fetchFlows();
+
+            // Reset import state
+            setImportFile(null);
+
+            console.log('Flow imported successfully:', result);
+        } catch (error) {
+            console.error('Failed to import flow:', error);
+            setError(error instanceof Error ? error.message : 'Failed to import flow');
+        } finally {
+            setImporting(false);
+        }
+    };
+
     const getStepTypeCounts = (steps: Step[]) => {
         const terminalSteps = steps.filter(step => step.terminal).length;
         const commandSteps = steps.filter(step => !step.terminal).length;
@@ -199,14 +269,87 @@ const FlowsPage: React.FC = () => {
                             Manage your development workflows with ease
                         </p>
                     </div>
-                    <Button
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg shadow-md hover:shadow-lg transition-all duration-200"
-                        onClick={() => setShowCreateModal(true)}
-                    >
-                        <Zap className="h-4 w-4 mr-2" />
-                        Create New Flow
-                    </Button>
+                    <div className="flex items-center gap-3">
+                        {/* Import Flow */}
+                        <div className="relative">
+                            <input
+                                type="file"
+                                accept=".json"
+                                onChange={handleImportFile}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                id="import-file"
+                            />
+                            <Button
+                                variant="outline"
+                                className="flex items-center gap-2"
+                                disabled={importing}
+                            >
+                                {importing ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Upload className="h-4 w-4" />
+                                )}
+                                Import Flow
+                            </Button>
+                        </div>
+
+                        {/* Import Flow Button (when file selected) */}
+                        {importFile && (
+                            <Button
+                                onClick={handleImportFlow}
+                                disabled={importing}
+                                className="bg-green-600 hover:bg-green-700 text-white"
+                            >
+                                {importing ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Importing...
+                                    </>
+                                ) : (
+                                    <>
+                                        <CheckCircle className="h-4 w-4 mr-2" />
+                                        Import {importFile.name}
+                                    </>
+                                )}
+                            </Button>
+                        )}
+
+                        <Button
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg shadow-md hover:shadow-lg transition-all duration-200"
+                            onClick={() => setShowCreateModal(true)}
+                        >
+                            <Plus className="h-4 w-4 mr-2" />
+                            Create New Flow
+                        </Button>
+                    </div>
                 </div>
+
+                {/* Success/Error Messages */}
+                {importSuccess && (
+                    <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                        <div className="flex items-center gap-2 text-green-800">
+                            <CheckCircle className="h-5 w-5" />
+                            <span className="font-medium">{importSuccess}</span>
+                        </div>
+                    </div>
+                )}
+
+                {error && (
+                    <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+                        <div className="flex items-center gap-2 text-red-800">
+                            <AlertCircle className="h-5 w-5" />
+                            <span className="font-medium">{error}</span>
+                            <Button
+                                onClick={() => setError(null)}
+                                variant="ghost"
+                                size="sm"
+                                className="ml-auto text-red-600 hover:text-red-800"
+                            >
+                                ×
+                            </Button>
+                        </div>
+                    </div>
+                )}
 
                 {/* Flows Table */}
                 {flows.length > 0 ? (
@@ -332,6 +475,20 @@ const FlowsPage: React.FC = () => {
                                                             Execute
                                                         </Button>
                                                     </Link>
+                                                    <Button
+                                                        onClick={() => flow.id && handleExportFlow(flow.id, flow.name)}
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="flex items-center gap-2 text-slate-600 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700/30"
+                                                        disabled={exportingFlowId === flow.id || isDeleting || !flow.id}
+                                                    >
+                                                        {exportingFlowId === flow.id ? (
+                                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                                        ) : (
+                                                            <Download className="h-3 w-3" />
+                                                        )}
+                                                        {exportingFlowId === flow.id ? 'Exporting...' : 'Export'}
+                                                    </Button>
                                                     <Button
                                                         onClick={() => flow.id && handleDeleteFlow(flow.id, flow.name)}
                                                         variant="outline"

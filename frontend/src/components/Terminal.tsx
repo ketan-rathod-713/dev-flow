@@ -78,7 +78,7 @@ const Terminal: React.FC<TerminalProps> = ({ command, stepId, onDone, className 
             params.append('step_id', stepId.toString());
         }
 
-        const wsUrl = `ws://localhost:8080/api/shell${params.toString() ? '?' + params.toString() : ''}`;
+        const wsUrl = `ws://localhost:24050/api/shell${params.toString() ? '?' + params.toString() : ''}`;
 
         console.log('[Terminal] Connecting to:', wsUrl);
 

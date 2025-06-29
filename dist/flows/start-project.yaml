@@ -16,4 +16,4 @@ steps:
     command: "nomad job run $PROJECT_PATH/documents/nomad/minio.hcl"
     notes: "Start the Nomad job in a new tmux window."
     skip_prompt: false
-    terminal: true
+    terminal: false
