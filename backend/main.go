@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/base64"
 	"flag"
 	"fmt"
@@ -18,11 +19,15 @@ import (
 	"github.com/kr/pty"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	_ "github.com/mattn/go-sqlite3"
 	"gopkg.in/yaml.v2"
 )
 
 // Version information (set during build)
 var version = "dev"
+
+// Global database connection
+var db *sql.DB
 
 // Configuration structures
 type Config struct {
@@ -34,6 +39,11 @@ type Config struct {
 	WebSocket WebSocketConfig `yaml:"websocket"`
 	Flows     FlowsConfig     `yaml:"flows"`
 	System    SystemConfig    `yaml:"system"`
+	Database  DatabaseConfig  `yaml:"database"`
+}
+
+type DatabaseConfig struct {
+	Path string `yaml:"path"`
 }
 
 type ServiceConfig struct {
@@ -118,6 +128,11 @@ type CommandRequest struct {
 	Variables map[string]string `json:"variables,omitempty"`
 }
 
+// StepExecutionRequest represents the request payload for step execution by ID
+type StepExecutionRequest struct {
+	StepID int `json:"step_id" binding:"required"`
+}
+
 // CommandResult represents the result of command execution
 type CommandResult struct {
 	Command    string        `json:"command"`
@@ -129,18 +144,58 @@ type CommandResult struct {
 	ExecutedAt time.Time     `json:"executed_at"`
 }
 
+// Database models
+type FlowDB struct {
+	ID          int       `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type StepDB struct {
+	ID              int    `json:"id"`
+	FlowID          int    `json:"flow_id"`
+	Name            string `json:"name"`
+	Command         string `json:"command"`
+	Notes           string `json:"notes,omitempty"`
+	SkipPrompt      bool   `json:"skip_prompt"`
+	Terminal        bool   `json:"terminal"`
+	TmuxSessionName string `json:"tmux_session_name"`
+	IsTmuxTerminal  bool   `json:"is_tmux_terminal"` // If terminal is true and this also true then use the session to run the command inside it. Create session if not exists.
+	OrderIndex      int    `json:"order_index"`
+}
+
+type VariableDB struct {
+	ID     int    `json:"id"`
+	FlowID int    `json:"flow_id"`
+	Key    string `json:"key"`
+	Value  string `json:"value"`
+}
+
+// API models (keeping existing for compatibility)
 type Step struct {
-	Name       string `yaml:"name" json:"name"`
-	Command    string `yaml:"command" json:"command"`
-	Notes      string `yaml:"notes,omitempty" json:"notes,omitempty"`
-	SkipPrompt bool   `yaml:"skip_prompt,omitempty" json:"skip_prompt,omitempty"`
-	Terminal   bool   `yaml:"terminal" json:"terminal"`
+	ID              int    `yaml:"-" json:"id,omitempty"`
+	Name            string `yaml:"name" json:"name"`
+	Command         string `yaml:"command" json:"command"`
+	Notes           string `yaml:"notes,omitempty" json:"notes,omitempty"`
+	SkipPrompt      bool   `yaml:"skip_prompt,omitempty" json:"skip_prompt,omitempty"`
+	Terminal        bool   `yaml:"terminal" json:"terminal"`
+	TmuxSessionName string `yaml:"tmux_session_name,omitempty" json:"tmux_session_name,omitempty"`
+	IsTmuxTerminal  bool   `yaml:"is_tmux_terminal,omitempty" json:"is_tmux_terminal,omitempty"`
 }
 
 type Flow struct {
+	ID        int               `json:"id"`
 	Name      string            `yaml:"name" json:"name"`
 	Variables map[string]string `yaml:"variables,omitempty" json:"variables"`
 	Steps     []Step            `yaml:"steps" json:"steps"`
+}
+
+type CreateFlowRequest struct {
+	Name      string            `json:"name" binding:"required"`
+	Variables map[string]string `json:"variables,omitempty"`
+	Steps     []Step            `json:"steps"`
 }
 
 var upgrader = websocket.Upgrader{
@@ -196,6 +251,9 @@ func loadConfig(configPath string) (*Config, error) {
 				Timeout:       "30m",
 				MaxConcurrent: 5,
 			},
+		},
+		Database: DatabaseConfig{
+			Path: "./data/flows.db",
 		},
 	}
 
@@ -382,40 +440,411 @@ func handleShellWebSocket(c echo.Context) error {
 	return nil
 }
 
-// getFlows handles GET /flows
-func getFlows(c echo.Context) error {
-	flowsDir := config.Data.FlowsDir
-	if flowsDir == "" {
-		flowsDir = "./flows"
+// Initialize database
+func initDatabase() error {
+	dbPath := "./data/flows.db"
+	if config != nil && config.Database.Path != "" {
+		dbPath = config.Database.Path
 	}
 
-	// Check if flows directory exists
-	if _, err := os.Stat(flowsDir); os.IsNotExist(err) {
-		return c.JSON(http.StatusOK, []Flow{})
+	// Ensure directory exists
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		return fmt.Errorf("failed to create database directory: %v", err)
 	}
 
-	files, err := filepath.Glob(filepath.Join(flowsDir, "*.yaml"))
+	var err error
+	db, err = sql.Open("sqlite3", dbPath)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "Failed to read flows directory",
+		return fmt.Errorf("failed to open database: %v", err)
+	}
+
+	// Test connection
+	if err = db.Ping(); err != nil {
+		return fmt.Errorf("failed to ping database: %v", err)
+	}
+
+	// Create tables
+	if err = createTables(); err != nil {
+		return fmt.Errorf("failed to create tables: %v", err)
+	}
+
+	log.Printf("Database initialized successfully at: %s", dbPath)
+	return nil
+}
+
+func createTables() error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS flows (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT UNIQUE NOT NULL,
+			description TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS steps (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			flow_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			command TEXT NOT NULL,
+			notes TEXT,
+			skip_prompt BOOLEAN DEFAULT FALSE,
+			terminal BOOLEAN DEFAULT FALSE,
+			tmux_session_name TEXT,
+			is_tmux_terminal BOOLEAN DEFAULT FALSE,
+			order_index INTEGER NOT NULL,
+			FOREIGN KEY (flow_id) REFERENCES flows (id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS variables (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			flow_id INTEGER NOT NULL,
+			key TEXT NOT NULL,
+			value TEXT,
+			FOREIGN KEY (flow_id) REFERENCES flows (id) ON DELETE CASCADE,
+			UNIQUE(flow_id, key)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_steps_flow_id ON steps(flow_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_variables_flow_id ON variables(flow_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_steps_order ON steps(flow_id, order_index)`,
+	}
+
+	for _, query := range queries {
+		if _, err := db.Exec(query); err != nil {
+			return fmt.Errorf("failed to execute query %s: %v", query, err)
+		}
+	}
+
+	return nil
+}
+
+// Database operations
+func createFlow(req CreateFlowRequest) (*FlowDB, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Insert flow
+	result, err := tx.Exec(
+		"INSERT INTO flows (name, description) VALUES (?, ?)",
+		req.Name, "",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert flow: %v", err)
+	}
+
+	flowID, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get flow ID: %v", err)
+	}
+
+	// Insert variables
+	for key, value := range req.Variables {
+		_, err = tx.Exec(
+			"INSERT INTO variables (flow_id, key, value) VALUES (?, ?, ?)",
+			flowID, key, value,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert variable %s: %v", key, err)
+		}
+	}
+
+	// Insert steps
+	for i, step := range req.Steps {
+		_, err = tx.Exec(
+			"INSERT INTO steps (flow_id, name, command, notes, skip_prompt, terminal, tmux_session_name, is_tmux_terminal, order_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			flowID, step.Name, step.Command, step.Notes, step.SkipPrompt, step.Terminal, step.TmuxSessionName, step.IsTmuxTerminal, i,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert step %s: %v", step.Name, err)
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	// Return created flow
+	return getFlowByID(int(flowID))
+}
+
+func getFlowByID(id int) (*FlowDB, error) {
+	var flow FlowDB
+	err := db.QueryRow(
+		"SELECT id, name, description, created_at, updated_at FROM flows WHERE id = ?",
+		id,
+	).Scan(&flow.ID, &flow.Name, &flow.Description, &flow.CreatedAt, &flow.UpdatedAt)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get flow: %v", err)
+	}
+
+	return &flow, nil
+}
+
+func getAllFlows() ([]Flow, error) {
+	rows, err := db.Query("SELECT id, name FROM flows ORDER BY created_at DESC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query flows: %v", err)
+	}
+	defer rows.Close()
+
+	var flows []Flow
+	for rows.Next() {
+		var flowID int
+		var flowName string
+		if err := rows.Scan(&flowID, &flowName); err != nil {
+			return nil, fmt.Errorf("failed to scan flow: %v", err)
+		}
+
+		// Get variables
+		variables, err := getFlowVariables(flowID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get variables for flow %d: %v", flowID, err)
+		}
+
+		// Get steps
+		steps, err := getFlowSteps(flowID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get steps for flow %d: %v", flowID, err)
+		}
+
+		flows = append(flows, Flow{
+			ID:        flowID,
+			Name:      flowName,
+			Variables: variables,
+			Steps:     steps,
 		})
 	}
 
-	var flows []Flow
-	for _, file := range files {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			log.Printf("Error reading file %s: %v", file, err)
-			continue
+	return flows, nil
+}
+
+func getFlowVariables(flowID int) (map[string]string, error) {
+	rows, err := db.Query("SELECT key, value FROM variables WHERE flow_id = ?", flowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	variables := make(map[string]string)
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, err
+		}
+		variables[key] = value
+	}
+
+	return variables, nil
+}
+
+func getFlowSteps(flowID int) ([]Step, error) {
+	rows, err := db.Query(
+		"SELECT id, name, command, notes, skip_prompt, terminal, tmux_session_name, is_tmux_terminal FROM steps WHERE flow_id = ? ORDER BY order_index",
+		flowID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var steps []Step
+	for rows.Next() {
+		var step Step
+		if err := rows.Scan(&step.ID, &step.Name, &step.Command, &step.Notes, &step.SkipPrompt, &step.Terminal, &step.TmuxSessionName, &step.IsTmuxTerminal); err != nil {
+			return nil, err
+		}
+		steps = append(steps, step)
+	}
+
+	return steps, nil
+}
+
+// New function to get step by ID
+func getStepByID(stepID int) (*StepDB, error) {
+	var step StepDB
+	err := db.QueryRow(
+		"SELECT id, flow_id, name, command, notes, skip_prompt, terminal, tmux_session_name, is_tmux_terminal, order_index FROM steps WHERE id = ?",
+		stepID,
+	).Scan(&step.ID, &step.FlowID, &step.Name, &step.Command, &step.Notes, &step.SkipPrompt, &step.Terminal, &step.TmuxSessionName, &step.IsTmuxTerminal, &step.OrderIndex)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get step: %v", err)
+	}
+
+	return &step, nil
+}
+
+// Enhanced executeCommand function with tmux support
+func executeCommandWithTmux(command string, variables map[string]string, tmuxSessionName string, isTmuxTerminal bool) CommandResult {
+	start := time.Now()
+
+	// Substitute variables in the command
+	finalCommand := command
+	for key, value := range variables {
+		placeholder := fmt.Sprintf("${%s}", key)
+		finalCommand = strings.ReplaceAll(finalCommand, placeholder, value)
+	}
+
+	log.Printf("Executing command: %s", finalCommand)
+	if len(variables) > 0 {
+		log.Printf("Original command: %s", command)
+		log.Printf("Variables: %+v", variables)
+	}
+
+	// Check if command is blocked by security policy
+	if isCommandBlocked(finalCommand) {
+		log.Printf("Command blocked by security policy: %s", finalCommand)
+		return CommandResult{
+			Command:    command,
+			ExitCode:   -1,
+			Stdout:     "",
+			Stderr:     "Command blocked by security policy",
+			Duration:   time.Since(start),
+			Success:    false,
+			ExecutedAt: start,
+		}
+	}
+
+	var cmd *exec.Cmd
+
+	if isTmuxTerminal && tmuxSessionName != "" {
+		// Check if tmux session exists
+		checkCmd := exec.Command("tmux", "has-session", "-t", tmuxSessionName)
+		if err := checkCmd.Run(); err != nil {
+			// Session doesn't exist, create it
+			log.Printf("Creating tmux session: %s", tmuxSessionName)
+			createCmd := exec.Command("tmux", "new-session", "-d", "-s", tmuxSessionName)
+			if err := createCmd.Run(); err != nil {
+				log.Printf("Failed to create tmux session %s: %v", tmuxSessionName, err)
+				return CommandResult{
+					Command:    command,
+					ExitCode:   -1,
+					Stdout:     "",
+					Stderr:     fmt.Sprintf("Failed to create tmux session: %v", err),
+					Duration:   time.Since(start),
+					Success:    false,
+					ExecutedAt: start,
+				}
+			}
 		}
 
-		var flow Flow
-		if err := yaml.Unmarshal(data, &flow); err != nil {
-			log.Printf("Error parsing YAML file %s: %v", file, err)
-			continue
-		}
+		// Execute command in tmux session
+		cmd = exec.Command("tmux", "send-keys", "-t", tmuxSessionName, finalCommand, "Enter")
+		log.Printf("Executing in tmux session %s: %s", tmuxSessionName, finalCommand)
+	} else {
+		// Regular command execution
+		cmd = exec.Command("/bin/bash", "-c", finalCommand)
+	}
 
-		flows = append(flows, flow)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	duration := time.Since(start)
+
+	exitCode := 0
+	if err != nil {
+		if exitError, ok := err.(*exec.ExitError); ok {
+			exitCode = exitError.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+
+	success := exitCode == 0
+
+	result := CommandResult{
+		Command:    command,
+		ExitCode:   exitCode,
+		Stdout:     stdout.String(),
+		Stderr:     stderr.String(),
+		Duration:   duration,
+		Success:    success,
+		ExecutedAt: start,
+	}
+
+	log.Printf("Command completed: exit_code=%d, duration=%v, success=%v", exitCode, duration, success)
+	return result
+}
+
+// New handler for step execution by ID
+func handleStepExecution(c echo.Context) error {
+	var req StepExecutionRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid request payload",
+		})
+	}
+
+	// Get step details
+	step, err := getStepByID(req.StepID)
+	if err != nil {
+		log.Printf("Error getting step %d: %v", req.StepID, err)
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": "Step not found",
+		})
+	}
+
+	// Get flow variables
+	variables, err := getFlowVariables(step.FlowID)
+	if err != nil {
+		log.Printf("Error getting variables for flow %d: %v", step.FlowID, err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to get flow variables",
+		})
+	}
+
+	// Execute the command
+	result := executeCommandWithTmux(step.Command, variables, step.TmuxSessionName, step.IsTmuxTerminal)
+
+	return c.JSON(http.StatusOK, result)
+}
+
+// Updated handlers
+func handleCreateFlow(c echo.Context) error {
+	var req CreateFlowRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid request payload",
+		})
+	}
+
+	if req.Name == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Flow name is required",
+		})
+	}
+
+	flow, err := createFlow(req)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return c.JSON(http.StatusConflict, map[string]string{
+				"error": "Flow with this name already exists",
+			})
+		}
+		log.Printf("Error creating flow: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to create flow",
+		})
+	}
+
+	return c.JSON(http.StatusCreated, flow)
+}
+
+func getFlows(c echo.Context) error {
+	flows, err := getAllFlows()
+	if err != nil {
+		log.Printf("Error getting flows: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to retrieve flows",
+		})
+	}
+
+	if flows == nil {
+		return c.JSON(http.StatusOK, []Flow{})
 	}
 
 	return c.JSON(http.StatusOK, flows)
@@ -483,6 +912,355 @@ func setupStaticFileServer(e *echo.Echo) {
 	})
 }
 
+type UpdateFlowRequest struct {
+	Name        string            `json:"name" binding:"required"`
+	Description string            `json:"description,omitempty"`
+	Variables   map[string]string `json:"variables,omitempty"`
+}
+
+type UpdateStepRequest struct {
+	Name            string `json:"name" binding:"required"`
+	Command         string `json:"command" binding:"required"`
+	Notes           string `json:"notes,omitempty"`
+	SkipPrompt      bool   `json:"skip_prompt"`
+	Terminal        bool   `json:"terminal"`
+	TmuxSessionName string `json:"tmux_session_name,omitempty"`
+	IsTmuxTerminal  bool   `json:"is_tmux_terminal"`
+	OrderIndex      int    `json:"order_index"`
+}
+
+type CreateStepRequest struct {
+	FlowID          int    `json:"flow_id" binding:"required"`
+	Name            string `json:"name" binding:"required"`
+	Command         string `json:"command" binding:"required"`
+	Notes           string `json:"notes,omitempty"`
+	SkipPrompt      bool   `json:"skip_prompt"`
+	Terminal        bool   `json:"terminal"`
+	TmuxSessionName string `json:"tmux_session_name,omitempty"`
+	IsTmuxTerminal  bool   `json:"is_tmux_terminal"`
+	OrderIndex      int    `json:"order_index"`
+}
+
+type UpdateVariableRequest struct {
+	Key   string `json:"key" binding:"required"`
+	Value string `json:"value"`
+}
+
+// Database operations for editing
+func updateFlow(flowID int, req UpdateFlowRequest) (*FlowDB, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Update flow details
+	_, err = tx.Exec(
+		"UPDATE flows SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		req.Name, req.Description, flowID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update flow: %v", err)
+	}
+
+	// Delete existing variables
+	_, err = tx.Exec("DELETE FROM variables WHERE flow_id = ?", flowID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete existing variables: %v", err)
+	}
+
+	// Insert new variables
+	for key, value := range req.Variables {
+		_, err = tx.Exec(
+			"INSERT INTO variables (flow_id, key, value) VALUES (?, ?, ?)",
+			flowID, key, value,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert variable %s: %v", key, err)
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	return getFlowByID(flowID)
+}
+
+func updateStep(stepID int, req UpdateStepRequest) (*StepDB, error) {
+	_, err := db.Exec(
+		"UPDATE steps SET name = ?, command = ?, notes = ?, skip_prompt = ?, terminal = ?, tmux_session_name = ?, is_tmux_terminal = ?, order_index = ? WHERE id = ?",
+		req.Name, req.Command, req.Notes, req.SkipPrompt, req.Terminal, req.TmuxSessionName, req.IsTmuxTerminal, req.OrderIndex, stepID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update step: %v", err)
+	}
+
+	return getStepByID(stepID)
+}
+
+func createStep(req CreateStepRequest) (*StepDB, error) {
+	result, err := db.Exec(
+		"INSERT INTO steps (flow_id, name, command, notes, skip_prompt, terminal, tmux_session_name, is_tmux_terminal, order_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		req.FlowID, req.Name, req.Command, req.Notes, req.SkipPrompt, req.Terminal, req.TmuxSessionName, req.IsTmuxTerminal, req.OrderIndex,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create step: %v", err)
+	}
+
+	stepID, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get step ID: %v", err)
+	}
+
+	return getStepByID(int(stepID))
+}
+
+func deleteStep(stepID int) error {
+	_, err := db.Exec("DELETE FROM steps WHERE id = ?", stepID)
+	if err != nil {
+		return fmt.Errorf("failed to delete step: %v", err)
+	}
+	return nil
+}
+
+func updateVariable(flowID int, key string, req UpdateVariableRequest) error {
+	_, err := db.Exec(
+		"INSERT OR REPLACE INTO variables (flow_id, key, value) VALUES (?, ?, ?)",
+		flowID, req.Key, req.Value,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update variable: %v", err)
+	}
+	return nil
+}
+
+func deleteVariable(flowID int, key string) error {
+	_, err := db.Exec("DELETE FROM variables WHERE flow_id = ? AND key = ?", flowID, key)
+	if err != nil {
+		return fmt.Errorf("failed to delete variable: %v", err)
+	}
+	return nil
+}
+
+func deleteFlow(flowID int) error {
+	_, err := db.Exec("DELETE FROM flows WHERE id = ?", flowID)
+	if err != nil {
+		return fmt.Errorf("failed to delete flow: %v", err)
+	}
+	return nil
+}
+
+// New handlers for editing
+func handleUpdateFlow(c echo.Context) error {
+	flowID := c.Param("id")
+	if flowID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Flow ID is required",
+		})
+	}
+
+	var req UpdateFlowRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid request payload",
+		})
+	}
+
+	id := 0
+	if _, err := fmt.Sscanf(flowID, "%d", &id); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid flow ID",
+		})
+	}
+
+	flow, err := updateFlow(id, req)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return c.JSON(http.StatusConflict, map[string]string{
+				"error": "Flow with this name already exists",
+			})
+		}
+		log.Printf("Error updating flow: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to update flow",
+		})
+	}
+
+	return c.JSON(http.StatusOK, flow)
+}
+
+func handleDeleteFlow(c echo.Context) error {
+	flowID := c.Param("id")
+	if flowID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Flow ID is required",
+		})
+	}
+
+	id := 0
+	if _, err := fmt.Sscanf(flowID, "%d", &id); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid flow ID",
+		})
+	}
+
+	if err := deleteFlow(id); err != nil {
+		log.Printf("Error deleting flow: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to delete flow",
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "Flow deleted successfully",
+	})
+}
+
+func handleUpdateStep(c echo.Context) error {
+	stepID := c.Param("id")
+	if stepID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Step ID is required",
+		})
+	}
+
+	var req UpdateStepRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid request payload",
+		})
+	}
+
+	id := 0
+	if _, err := fmt.Sscanf(stepID, "%d", &id); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid step ID",
+		})
+	}
+
+	step, err := updateStep(id, req)
+	if err != nil {
+		log.Printf("Error updating step: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to update step",
+		})
+	}
+
+	return c.JSON(http.StatusOK, step)
+}
+
+func handleCreateStep(c echo.Context) error {
+	var req CreateStepRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid request payload",
+		})
+	}
+
+	step, err := createStep(req)
+	if err != nil {
+		log.Printf("Error creating step: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to create step",
+		})
+	}
+
+	return c.JSON(http.StatusCreated, step)
+}
+
+func handleDeleteStep(c echo.Context) error {
+	stepID := c.Param("id")
+	if stepID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Step ID is required",
+		})
+	}
+
+	id := 0
+	if _, err := fmt.Sscanf(stepID, "%d", &id); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid step ID",
+		})
+	}
+
+	if err := deleteStep(id); err != nil {
+		log.Printf("Error deleting step: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to delete step",
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "Step deleted successfully",
+	})
+}
+
+func handleUpdateVariable(c echo.Context) error {
+	flowID := c.Param("flowId")
+	key := c.Param("key")
+
+	if flowID == "" || key == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Flow ID and variable key are required",
+		})
+	}
+
+	var req UpdateVariableRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid request payload",
+		})
+	}
+
+	id := 0
+	if _, err := fmt.Sscanf(flowID, "%d", &id); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid flow ID",
+		})
+	}
+
+	if err := updateVariable(id, key, req); err != nil {
+		log.Printf("Error updating variable: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to update variable",
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "Variable updated successfully",
+	})
+}
+
+func handleDeleteVariable(c echo.Context) error {
+	flowID := c.Param("flowId")
+	key := c.Param("key")
+
+	if flowID == "" || key == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Flow ID and variable key are required",
+		})
+	}
+
+	id := 0
+	if _, err := fmt.Sscanf(flowID, "%d", &id); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid flow ID",
+		})
+	}
+
+	if err := deleteVariable(id, key); err != nil {
+		log.Printf("Error deleting variable: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to delete variable",
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "Variable deleted successfully",
+	})
+}
+
 func main() {
 	// Command line flags
 	var (
@@ -521,6 +1299,20 @@ func main() {
 
 	log.Printf("Starting DevTool v%s", version)
 
+	// Initialize database
+	if err := initDatabase(); err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	// Ensure database is closed on exit
+	defer func() {
+		if db != nil {
+			if err := db.Close(); err != nil {
+				log.Printf("Error closing database: %v", err)
+			}
+		}
+	}()
+
 	e := echo.New()
 
 	// Middleware
@@ -538,10 +1330,14 @@ func main() {
 	setupStaticFileServer(e)
 
 	// API routes
-	api := e.Group("")
+	api := e.Group("/api")
 
 	// Flow routes
+	api.POST("/flows", handleCreateFlow)
 	api.GET("/flows", getFlows)
+
+	// Step execution routes
+	api.POST("/execute-step", handleStepExecution)
 
 	// Shell routes
 	api.GET("/shell", handleShellWebSocket)
@@ -555,6 +1351,15 @@ func main() {
 			"service": config.Service.Name,
 		})
 	})
+
+	// New handlers for editing
+	api.PUT("/flows/:id", handleUpdateFlow)
+	api.DELETE("/flows/:id", handleDeleteFlow)
+	api.PUT("/steps/:id", handleUpdateStep)
+	api.POST("/steps", handleCreateStep)
+	api.DELETE("/steps/:id", handleDeleteStep)
+	api.PUT("/variables/:flowId/:key", handleUpdateVariable)
+	api.DELETE("/variables/:flowId/:key", handleDeleteVariable)
 
 	// Start server
 	address := fmt.Sprintf("%s:%d", config.Service.Host, config.Service.Port)

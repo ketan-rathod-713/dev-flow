@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { fetchFlows } from '../api/flows';
+import { fetchFlows, createFlow, deleteFlow } from '../api/flows';
+import type { CreateFlowRequest } from '../api/flows';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import CreateFlowModal from '../components/CreateFlowModal';
+import EditFlowModal from '../components/EditFlowModal';
 import {
     Workflow,
     Clock,
@@ -13,19 +15,26 @@ import {
     Eye,
     Settings,
     Terminal,
-    Code
+    Code,
+    Edit3,
+    Trash2,
+    AlertCircle
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 type Step = {
+    id?: number;
     name: string;
     command: string;
     notes?: string;
     skip_prompt?: boolean;
     terminal?: boolean;
+    tmux_session_name?: string;
+    is_tmux_terminal?: boolean;
 };
 
 type Flow = {
+    id?: number;
     name: string;
     variables: Record<string, string>;
     steps: Step[];
@@ -36,6 +45,9 @@ const FlowsPage: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
+    const [showEditModal, setShowEditModal] = useState(false);
+    const [editingFlow, setEditingFlow] = useState<Flow | null>(null);
+    const [deletingFlowId, setDeletingFlowId] = useState<number | null>(null);
 
     useEffect(() => {
         fetchFlows()
@@ -44,14 +56,81 @@ const FlowsPage: React.FC = () => {
             .finally(() => setLoading(false));
     }, []);
 
-    const handleCreateFlow = (newFlow: { name: string; variables: Record<string, string>; steps: Step[] }) => {
+    const handleCreateFlow = async (newFlow: { name: string; variables: Record<string, string>; steps: Step[] }) => {
         console.log('Creating new flow:', newFlow);
 
-        // Add the new flow to the list (in real app, this would be an API call)
-        setFlows(prev => [...prev, newFlow]);
+        try {
+            // Convert the flow data to match the API interface
+            const flowData: CreateFlowRequest = {
+                name: newFlow.name,
+                variables: newFlow.variables,
+                steps: newFlow.steps.map(step => ({
+                    name: step.name,
+                    command: step.command,
+                    notes: step.notes || '',
+                    skip_prompt: step.skip_prompt || false,
+                    terminal: step.terminal || false,
+                    tmux_session_name: step.tmux_session_name || '',
+                    is_tmux_terminal: step.is_tmux_terminal || false
+                }))
+            };
 
-        // You could show a success toast here
-        // In a real app, you'd make an API call to save the flow to the backend
+            // Call the API to create the flow
+            await createFlow(flowData);
+
+            // Refresh the flows list
+            const updatedFlows = await fetchFlows();
+            setFlows(updatedFlows);
+
+            console.log('Flow created successfully');
+        } catch (error) {
+            console.error('Failed to create flow:', error);
+            setError('Failed to create flow. Please try again.');
+        }
+    };
+
+    const handleEditFlow = (flow: Flow) => {
+        setEditingFlow(flow);
+        setShowEditModal(true);
+    };
+
+    const handleUpdateFlow = async (updatedFlow: Flow) => {
+        try {
+            // Refresh the flows list
+            const updatedFlows = await fetchFlows();
+            setFlows(updatedFlows);
+
+            // Update the editing flow state with the latest data
+            const refreshedFlow = updatedFlows.find((f: Flow) => f.id === updatedFlow.id);
+            if (refreshedFlow) {
+                setEditingFlow(refreshedFlow);
+            }
+
+            console.log('Flow updated successfully');
+        } catch (error) {
+            console.error('Failed to refresh flows after update:', error);
+            setError('Failed to refresh flows. Please reload the page.');
+        }
+    };
+
+    const handleDeleteFlow = async (flowId: number, flowName: string) => {
+        if (!confirm(`Are you sure you want to delete "${flowName}"? This action cannot be undone.`)) {
+            return;
+        }
+
+        try {
+            setDeletingFlowId(flowId);
+            await deleteFlow(flowId);
+
+            // Remove the flow from the local state
+            setFlows(prev => prev.filter(flow => flow.id !== flowId));
+            console.log('Flow deleted successfully');
+        } catch (error) {
+            console.error('Failed to delete flow:', error);
+            setError('Failed to delete flow. Please try again.');
+        } finally {
+            setDeletingFlowId(null);
+        }
     };
 
     const getStepTypeCounts = (steps: Step[]) => {
@@ -76,10 +155,26 @@ const FlowsPage: React.FC = () => {
             <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center">
                 <Card className="max-w-md mx-auto border-red-200 dark:border-red-800">
                     <CardHeader>
-                        <CardTitle className="text-red-600 dark:text-red-400">Error</CardTitle>
+                        <CardTitle className="text-red-600 dark:text-red-400 flex items-center gap-2">
+                            <AlertCircle className="h-5 w-5" />
+                            Error
+                        </CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <p className="text-slate-600 dark:text-slate-300">{error}</p>
+                        <p className="text-slate-600 dark:text-slate-300 mb-4">{error}</p>
+                        <Button
+                            onClick={() => {
+                                setError(null);
+                                setLoading(true);
+                                fetchFlows()
+                                    .then(setFlows)
+                                    .catch((e) => setError(e.message))
+                                    .finally(() => setLoading(false));
+                            }}
+                            className="w-full"
+                        >
+                            Try Again
+                        </Button>
                     </CardContent>
                 </Card>
             </div>
@@ -128,11 +223,11 @@ const FlowsPage: React.FC = () => {
                             <div className="overflow-x-auto">
                                 {/* Table Header */}
                                 <div className="grid grid-cols-12 gap-4 px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 text-sm font-medium text-slate-600 dark:text-slate-300">
-                                    <div className="col-span-4">Flow Name</div>
+                                    <div className="col-span-3">Flow Name</div>
                                     <div className="col-span-2">Steps</div>
                                     <div className="col-span-2">Variables</div>
                                     <div className="col-span-2">Types</div>
-                                    <div className="col-span-2 text-right">Actions</div>
+                                    <div className="col-span-3 text-right">Actions</div>
                                 </div>
 
                                 {/* Table Body */}
@@ -140,14 +235,15 @@ const FlowsPage: React.FC = () => {
                                     {flows.map((flow, flowIdx) => {
                                         const { terminalSteps, commandSteps } = getStepTypeCounts(flow.steps);
                                         const variableCount = Object.keys(flow.variables).length;
+                                        const isDeleting = deletingFlowId === flow.id;
 
                                         return (
                                             <div
                                                 key={flowIdx}
-                                                className="grid grid-cols-12 gap-4 px-6 py-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors duration-150"
+                                                className={`grid grid-cols-12 gap-4 px-6 py-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors duration-150 ${isDeleting ? 'opacity-50' : ''}`}
                                             >
                                                 {/* Flow Name */}
-                                                <div className="col-span-4 flex items-center gap-3">
+                                                <div className="col-span-3 flex items-center gap-3">
                                                     <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
                                                         <Zap className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                                                     </div>
@@ -204,26 +300,52 @@ const FlowsPage: React.FC = () => {
                                                 </div>
 
                                                 {/* Actions */}
-                                                <div className="col-span-2 flex items-center justify-end gap-2">
+                                                <div className="col-span-3 flex items-center justify-end gap-2">
                                                     <Link to={`/flow/${encodeURIComponent(flow.name)}`}>
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
                                                             className="flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-700"
+                                                            disabled={isDeleting}
                                                         >
                                                             <Eye className="h-3 w-3" />
                                                             View
                                                         </Button>
                                                     </Link>
+                                                    <Button
+                                                        onClick={() => handleEditFlow(flow)}
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-700"
+                                                        disabled={isDeleting}
+                                                    >
+                                                        <Edit3 className="h-3 w-3" />
+                                                        Edit
+                                                    </Button>
                                                     <Link to={`/flow/${encodeURIComponent(flow.name)}`}>
                                                         <Button
                                                             size="sm"
                                                             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                                                            disabled={isDeleting}
                                                         >
                                                             <Play className="h-3 w-3" />
                                                             Execute
                                                         </Button>
                                                     </Link>
+                                                    <Button
+                                                        onClick={() => flow.id && handleDeleteFlow(flow.id, flow.name)}
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="flex items-center gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                                        disabled={isDeleting || !flow.id}
+                                                    >
+                                                        {isDeleting ? (
+                                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                                        ) : (
+                                                            <Trash2 className="h-3 w-3" />
+                                                        )}
+                                                        {isDeleting ? 'Deleting...' : 'Delete'}
+                                                    </Button>
                                                 </div>
                                             </div>
                                         );
@@ -265,6 +387,17 @@ const FlowsPage: React.FC = () => {
                 isOpen={showCreateModal}
                 onClose={() => setShowCreateModal(false)}
                 onSubmit={handleCreateFlow}
+            />
+
+            {/* Edit Flow Modal */}
+            <EditFlowModal
+                isOpen={showEditModal}
+                onClose={() => {
+                    setShowEditModal(false);
+                    setEditingFlow(null);
+                }}
+                onSubmit={handleUpdateFlow}
+                flow={editingFlow}
             />
         </div>
     );
