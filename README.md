@@ -283,6 +283,20 @@ sudo userdel devtool
 - **Configuration**: `/opt/dev-tool/config/config.yaml`
 - **Data Directory**: `/opt/dev-tool/data/`
 
+## Screenshots
+
+1. Landing Page
+![image](https://github.com/user-attachments/assets/8e8347cd-7221-48a0-bade-cacefe95ea0a)
+
+2. Running Setup Commands
+![image](https://github.com/user-attachments/assets/867f00bb-74c0-46dc-8f98-bfc43ba49458)
+
+3. Example Of Command Execution
+![image](https://github.com/user-attachments/assets/4a65aee7-36d8-4baa-b9b4-59f7bbef8ecc)
+
+
+
+
 ## License
 
 MIT License - see LICENSE file for details.
