@@ -10,11 +10,12 @@ import 'xterm/css/xterm.css';
 
 interface TerminalProps {
     command?: string;
+    stepId?: number;
     onDone?: () => void;
     className?: string;
 }
 
-const Terminal: React.FC<TerminalProps> = ({ command, onDone, className }) => {
+const Terminal: React.FC<TerminalProps> = ({ command, stepId, onDone, className }) => {
     const xtermRef = useRef<HTMLDivElement>(null);
     const termRef = useRef<XTerm>(new XTerm());
     const wsRef = useRef<WebSocket>(new WebSocket('ws://localhost:8080/api/shell'));
@@ -68,10 +69,16 @@ const Terminal: React.FC<TerminalProps> = ({ command, onDone, className }) => {
             fitAddonRef.current.fit();
         }
 
-        // Build WebSocket URL with command parameter
-        const wsUrl = command
-            ? `ws://localhost:8080/api/shell?command=${encodeURIComponent(command)}`
-            : 'ws://localhost:8080/api/shell';
+        // Build WebSocket URL with command and step_id parameters
+        const params = new URLSearchParams();
+        if (command) {
+            params.append('command', command);
+        }
+        if (stepId) {
+            params.append('step_id', stepId.toString());
+        }
+
+        const wsUrl = `ws://localhost:8080/api/shell${params.toString() ? '?' + params.toString() : ''}`;
 
         console.log('[Terminal] Connecting to:', wsUrl);
 
@@ -83,6 +90,9 @@ const Terminal: React.FC<TerminalProps> = ({ command, onDone, className }) => {
             setIsConnected(true);
             setConnectionStatus('Connected');
             termRef.current?.write('\x1b[32m✓ Connected to shell\x1b[0m\r\n');
+            if (stepId) {
+                termRef.current?.write(`\x1b[36m→ Environment variables loaded from step ${stepId}\x1b[0m\r\n`);
+            }
             if (command) {
                 termRef.current?.write(`\x1b[36m→ Executing: ${command}\x1b[0m\r\n`);
             }
@@ -139,7 +149,7 @@ const Terminal: React.FC<TerminalProps> = ({ command, onDone, className }) => {
             }
             termRef.current?.dispose();
         };
-    }, [command, onDone]);
+    }, [command, stepId, onDone]);
 
     const handleExit = () => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {

@@ -305,6 +305,10 @@ func executeCommand(command string, variables map[string]string) CommandResult {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+
+	log.Printf("Command: %s", command)
+	log.Printf("Variables: %+v", variables)
+
 	duration := time.Since(startTime)
 
 	exitCode := 0
@@ -317,10 +321,6 @@ func executeCommand(command string, variables map[string]string) CommandResult {
 			exitCode = -1
 		}
 	}
-
-	log.Printf("Command: %s", command)
-	log.Printf("Variables: %+v", variables)
-	log.Printf("Exit Code: %d", exitCode)
 
 	return CommandResult{
 		Command:    command,
@@ -365,12 +365,53 @@ func handleShellWebSocket(c echo.Context) error {
 
 	log.Println("WebSocket connection established")
 
+	// Get step ID from query parameter and fetch variables from database
+	var variables map[string]string
+	stepIDParam := c.QueryParam("step_id")
+	if stepIDParam != "" {
+		stepID := 0
+		if _, err := fmt.Sscanf(stepIDParam, "%d", &stepID); err == nil {
+			// Get step details to get flow ID
+			step, err := getStepByID(stepID)
+			if err != nil {
+				log.Printf("WebSocket: Failed to get step %d: %v", stepID, err)
+			} else {
+				// Get flow variables
+				flowVariables, err := getFlowVariables(step.FlowID)
+				if err != nil {
+					log.Printf("WebSocket: Failed to get variables for flow %d: %v", step.FlowID, err)
+				} else {
+					variables = flowVariables
+					log.Printf("WebSocket: Loaded %d variables for step %d (flow %d)", len(variables), stepID, step.FlowID)
+					for key, value := range variables {
+						log.Printf("WebSocket: Setting environment variable %s=%s", key, value)
+					}
+				}
+			}
+		} else {
+			log.Printf("WebSocket: Invalid step_id parameter: %s", stepIDParam)
+		}
+	}
+
+	// Initialize empty variables map if none were loaded
+	if variables == nil {
+		variables = make(map[string]string)
+	}
+
 	// Start bash with PTY
 	shell := config.System.Shell.DefaultShell
 	if shell == "" {
 		shell = "/bin/bash"
 	}
 	cmd := exec.Command(shell)
+
+	// Set environment variables for the shell
+	env := os.Environ()
+	for key, value := range variables {
+		env = append(env, fmt.Sprintf("%s=%s", key, value))
+	}
+	cmd.Env = env
+
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		log.Printf("Failed to start shell with PTY: %v", err)
@@ -385,8 +426,21 @@ func handleShellWebSocket(c echo.Context) error {
 			log.Printf("Blocked command attempt: %s", command)
 			return echo.NewHTTPError(http.StatusForbidden, "Command blocked by security policy")
 		}
-		log.Printf("Executing command: %s", command)
-		_, err := ptmx.Write([]byte(command + "\n"))
+
+		// Substitute variables in the command
+		finalCommand := command
+		for key, value := range variables {
+			placeholder := fmt.Sprintf("${%s}", key)
+			finalCommand = strings.ReplaceAll(finalCommand, placeholder, value)
+		}
+
+		log.Printf("Executing command: %s", finalCommand)
+		if len(variables) > 0 {
+			log.Printf("Original command: %s", command)
+			log.Printf("Variables: %+v", variables)
+		}
+
+		_, err := ptmx.Write([]byte(finalCommand + "\n"))
 		if err != nil {
 			log.Printf("Failed to write command to PTY: %v", err)
 		}
@@ -707,15 +761,23 @@ func executeCommandWithTmux(command string, variables map[string]string, tmuxSes
 		}
 	}
 
+	// Prepare environment variables
+	env := os.Environ()
+	for key, value := range variables {
+		env = append(env, fmt.Sprintf("%s=%s", key, value))
+	}
+
 	var cmd *exec.Cmd
 
 	if isTmuxTerminal && tmuxSessionName != "" {
 		// Check if tmux session exists
 		checkCmd := exec.Command("tmux", "has-session", "-t", tmuxSessionName)
+		checkCmd.Env = env
 		if err := checkCmd.Run(); err != nil {
 			// Session doesn't exist, create it
 			log.Printf("Creating tmux session: %s", tmuxSessionName)
 			createCmd := exec.Command("tmux", "new-session", "-d", "-s", tmuxSessionName)
+			createCmd.Env = env
 			if err := createCmd.Run(); err != nil {
 				log.Printf("Failed to create tmux session %s: %v", tmuxSessionName, err)
 				return CommandResult{
@@ -737,6 +799,9 @@ func executeCommandWithTmux(command string, variables map[string]string, tmuxSes
 		// Regular command execution
 		cmd = exec.Command("/bin/bash", "-c", finalCommand)
 	}
+
+	// Set environment variables for the command
+	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

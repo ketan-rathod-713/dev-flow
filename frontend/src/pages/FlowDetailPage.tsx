@@ -58,7 +58,7 @@ const FlowDetailPage = () => {
     const [editingVariable, setEditingVariable] = useState<string | null>(null);
     const [savingVariable, setSavingVariable] = useState<string | null>(null);
     const [showTerminalToggle, setShowTerminalToggle] = useState(false);
-    const [activeTerminal, setActiveTerminal] = useState<{ stepIndex: number; command: string } | null>(null);
+    const [activeTerminal, setActiveTerminal] = useState<{ stepIndex: number; stepId: number; command: string } | null>(null);
 
     useEffect(() => {
         console.log('FlowDetailPage: Looking for flow:', decodedFlowName);
@@ -147,9 +147,13 @@ const FlowDetailPage = () => {
 
         try {
             if (step.terminal || step.is_tmux_terminal) {
-                // For terminal steps, open the terminal with the command
+                // For terminal steps, open the terminal with the command and step ID
                 const finalCommand = step.command;
-                setActiveTerminal({ stepIndex, command: finalCommand });
+                setActiveTerminal({
+                    stepIndex,
+                    stepId: step.id || 0,
+                    command: finalCommand
+                });
                 setExecutionResults(prev => ({
                     ...prev,
                     [stepIndex]: {
@@ -376,6 +380,7 @@ const FlowDetailPage = () => {
                         <div className="p-4">
                             <Terminal
                                 command={activeTerminal.command}
+                                stepId={activeTerminal.stepId}
                                 onDone={handleTerminalDone}
                                 className="w-full"
                             />
