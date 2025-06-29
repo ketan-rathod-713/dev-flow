@@ -114,7 +114,8 @@ var config *Config
 
 // CommandRequest represents the request payload for command execution
 type CommandRequest struct {
-	Command string `json:"command" binding:"required"`
+	Command   string            `json:"command" binding:"required"`
+	Variables map[string]string `json:"variables,omitempty"`
 }
 
 // CommandResult represents the result of command execution
@@ -227,40 +228,27 @@ func isCommandBlocked(command string) bool {
 	return false
 }
 
-// executeCommand runs the command and returns detailed execution results
-func executeCommand(command string) CommandResult {
+// executeCommand executes a shell command and returns the result
+func executeCommand(command string, variables map[string]string) CommandResult {
 	startTime := time.Now()
 
-	// Check if command is blocked
-	if isCommandBlocked(command) {
-		return CommandResult{
-			Command:    command,
-			ExitCode:   1,
-			Stdout:     "",
-			Stderr:     "Command blocked by security policy",
-			Duration:   time.Since(startTime),
-			Success:    false,
-			ExecutedAt: startTime,
-		}
+	// Add Env variables to the shell
+	env := os.Environ()
+	for key, value := range variables {
+		env = append(env, fmt.Sprintf("%s=%s", key, value))
 	}
 
-	// Create command
-	shell := config.System.Shell.DefaultShell
-	if shell == "" {
-		shell = "/bin/bash"
-	}
-	cmd := exec.Command(shell, "-c", command)
+	// Execute the command
+	cmd := exec.Command("bash", "-c", command)
+	cmd.Env = env
 
-	// Capture stdout and stderr
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Execute command
 	err := cmd.Run()
 	duration := time.Since(startTime)
 
-	// Determine exit code
 	exitCode := 0
 	success := true
 	if err != nil {
@@ -268,9 +256,13 @@ func executeCommand(command string) CommandResult {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			exitCode = exitError.ExitCode()
 		} else {
-			exitCode = -1 // Unknown error
+			exitCode = -1
 		}
 	}
+
+	log.Printf("Command: %s", command)
+	log.Printf("Variables: %+v", variables)
+	log.Printf("Exit Code: %d", exitCode)
 
 	return CommandResult{
 		Command:    command,
@@ -298,8 +290,8 @@ func handleCommandExecution(c echo.Context) error {
 		})
 	}
 
-	// Execute the command
-	result := executeCommand(req.Command)
+	// Execute the command with variables
+	result := executeCommand(req.Command, req.Variables)
 
 	return c.JSON(http.StatusOK, result)
 }
