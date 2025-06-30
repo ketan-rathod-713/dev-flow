@@ -4,7 +4,6 @@ import { fetchFlows, createFlow, deleteFlow, exportFlow, importFlow } from '../a
 import type { CreateFlowRequest } from '../api/flows';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { Badge } from '../components/ui/badge';
 import CreateFlowModal from '../components/CreateFlowModal';
 import EditFlowModal from '../components/EditFlowModal';
 import {
@@ -13,10 +12,7 @@ import {
     Zap,
     Loader2,
     Play,
-    Eye,
     Settings,
-    Terminal,
-    Code,
     Edit3,
     Trash2,
     AlertCircle,
@@ -203,11 +199,11 @@ const FlowsPage: React.FC = () => {
         }
     };
 
-    const getStepTypeCounts = (steps: Step[]) => {
-        const terminalSteps = steps.filter(step => step.terminal).length;
-        const commandSteps = steps.filter(step => !step.terminal).length;
-        return { terminalSteps, commandSteps };
-    };
+    // const getStepTypeCounts = (steps: Step[]) => {
+    //     const terminalSteps = steps.filter(step => step.terminal).length;
+    //     const commandSteps = steps.filter(step => !step.terminal).length;
+    //         return { terminalSteps, commandSteps };
+    //     };
 
     if (loading) {
         return (
@@ -369,14 +365,14 @@ const FlowsPage: React.FC = () => {
                                     <div className="col-span-3">Flow Name</div>
                                     <div className="col-span-2">Steps</div>
                                     <div className="col-span-2">Variables</div>
-                                    <div className="col-span-2">Types</div>
+                                    <div className="col-span-2"></div>
                                     <div className="col-span-3 text-right">Actions</div>
                                 </div>
 
                                 {/* Table Body */}
                                 <div className="divide-y divide-slate-200 dark:divide-slate-700">
                                     {flows.map((flow, flowIdx) => {
-                                        const { terminalSteps, commandSteps } = getStepTypeCounts(flow.steps);
+                                        // const { terminalSteps, commandSteps } = getStepTypeCounts(flow.steps);
                                         const variableCount = Object.keys(flow.variables).length;
                                         const isDeleting = deletingFlowId === flow.id;
 
@@ -428,7 +424,7 @@ const FlowsPage: React.FC = () => {
 
                                                 {/* Step Types */}
                                                 <div className="col-span-2 flex items-center gap-2">
-                                                    {commandSteps > 0 && (
+                                                    {/* {commandSteps > 0 && (
                                                         <Badge variant="outline" className="text-xs flex items-center gap-1">
                                                             <Code className="h-3 w-3" />
                                                             {commandSteps}
@@ -439,12 +435,12 @@ const FlowsPage: React.FC = () => {
                                                             <Terminal className="h-3 w-3" />
                                                             {terminalSteps}
                                                         </Badge>
-                                                    )}
+                                                    )} */}
                                                 </div>
 
                                                 {/* Actions */}
                                                 <div className="col-span-3 flex items-center justify-end gap-2">
-                                                    <Link to={`/flow/${encodeURIComponent(flow.name)}`}>
+                                                    {/* <Link to={`/flow/${encodeURIComponent(flow.name)}`}>
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
@@ -454,7 +450,7 @@ const FlowsPage: React.FC = () => {
                                                             <Eye className="h-3 w-3" />
                                                             View
                                                         </Button>
-                                                    </Link>
+                                                    </Link> */}
                                                     <Button
                                                         onClick={() => handleEditFlow(flow)}
                                                         variant="outline"

@@ -14,9 +14,29 @@ import {
     Play,
     Edit3,
     Check,
-    AlertCircle
+    AlertCircle,
+    GripVertical
 } from 'lucide-react';
 import { updateFlow, updateStep, createStep, deleteStep, updateVariable, deleteVariable } from '../api/flows';
+import {
+    DndContext,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+    arrayMove,
+    SortableContext,
+    sortableKeyboardCoordinates,
+    verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import {
+    useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 type Step = {
     id?: number;
@@ -43,6 +63,268 @@ type EditFlowModalProps = {
     flow: Flow | null;
 };
 
+// Sortable Step Item Component
+const SortableStepItem: React.FC<{
+    step: Step;
+    index: number;
+    editingStepIndex: number | null;
+    setEditingStepIndex: (index: number | null) => void;
+    steps: Step[];
+    setSteps: React.Dispatch<React.SetStateAction<Step[]>>;
+    handleUpdateStep: (index: number, step: Step) => void;
+    handleRemoveStep: (index: number) => void;
+    loading: boolean;
+}> = ({ step, index, editingStepIndex, setEditingStepIndex, steps, setSteps, handleUpdateStep, handleRemoveStep, loading }) => {
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id: index.toString() });
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+    };
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={style}
+            className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-md"
+        >
+            {editingStepIndex === index ? (
+                // Edit mode
+                <div className="p-4 border border-slate-200 dark:border-slate-700 rounded-md space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                                Step Name *
+                            </label>
+                            <input
+                                type="text"
+                                value={step.name}
+                                onChange={(e) => {
+                                    const updatedSteps = [...steps];
+                                    updatedSteps[index] = { ...step, name: e.target.value };
+                                    setSteps(updatedSteps);
+                                }}
+                                placeholder="Enter step name"
+                                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                disabled={loading}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                                Command *
+                            </label>
+                            <input
+                                type="text"
+                                value={step.command}
+                                onChange={(e) => {
+                                    const updatedSteps = [...steps];
+                                    updatedSteps[index] = { ...step, command: e.target.value };
+                                    setSteps(updatedSteps);
+                                }}
+                                placeholder="Enter command"
+                                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                disabled={loading}
+                            />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                            Notes (Optional)
+                        </label>
+                        <textarea
+                            value={step.notes || ''}
+                            onChange={(e) => {
+                                const updatedSteps = [...steps];
+                                updatedSteps[index] = { ...step, notes: e.target.value };
+                                setSteps(updatedSteps);
+                            }}
+                            placeholder="Enter step notes"
+                            rows={2}
+                            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            disabled={loading}
+                        />
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <label className="flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                checked={step.skip_prompt}
+                                onChange={(e) => {
+                                    const updatedSteps = [...steps];
+                                    updatedSteps[index] = { ...step, skip_prompt: e.target.checked };
+                                    setSteps(updatedSteps);
+                                }}
+                                className="rounded border-slate-300 dark:border-slate-600"
+                                disabled={loading}
+                            />
+                            <span className="text-sm text-slate-700 dark:text-slate-300">Auto-run</span>
+                        </label>
+                        <label className="flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                checked={step.terminal}
+                                onChange={(e) => {
+                                    const updatedSteps = [...steps];
+                                    updatedSteps[index] = { ...step, terminal: e.target.checked };
+                                    setSteps(updatedSteps);
+                                }}
+                                className="rounded border-slate-300 dark:border-slate-600"
+                                disabled={loading}
+                            />
+                            <span className="text-sm text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                                <Terminal className="h-3 w-3" />
+                                Terminal mode
+                            </span>
+                        </label>
+                    </div>
+
+                    {/* Tmux Terminal Fields */}
+                    {step.terminal && (
+                        <div className="space-y-3 p-3 bg-slate-100 dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-600">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Terminal className="h-4 w-4 text-blue-600" />
+                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Terminal Configuration</span>
+                            </div>
+
+                            <label className="flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    checked={step.is_tmux_terminal}
+                                    onChange={(e) => {
+                                        const updatedSteps = [...steps];
+                                        updatedSteps[index] = { ...step, is_tmux_terminal: e.target.checked };
+                                        setSteps(updatedSteps);
+                                    }}
+                                    className="rounded border-slate-300 dark:border-slate-600"
+                                    disabled={loading}
+                                />
+                                <span className="text-sm text-slate-700 dark:text-slate-300">Use Tmux Terminal</span>
+                            </label>
+
+                            {step.is_tmux_terminal && (
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                                        Tmux Session Name
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={step.tmux_session_name || ''}
+                                        onChange={(e) => {
+                                            const updatedSteps = [...steps];
+                                            updatedSteps[index] = { ...step, tmux_session_name: e.target.value };
+                                            setSteps(updatedSteps);
+                                        }}
+                                        placeholder="e.g., dev-session, ${PROJECT_NAME}"
+                                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        disabled={loading}
+                                    />
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                                        You can use variables like ${"{"}SESSION_NAME{"}"} in the session name
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <div className="flex gap-2">
+                        <Button
+                            onClick={() => handleUpdateStep(index, step)}
+                            size="sm"
+                            className="flex items-center gap-1"
+                            disabled={loading}
+                        >
+                            <Check className="h-3 w-3" />
+                            Save Changes
+                        </Button>
+                        <Button
+                            onClick={() => setEditingStepIndex(null)}
+                            variant="outline"
+                            size="sm"
+                            disabled={loading}
+                        >
+                            Cancel
+                        </Button>
+                    </div>
+                </div>
+            ) : (
+                // View mode
+                <div className="flex items-start gap-3">
+                    {/* Drag Handle */}
+                    <div
+                        {...attributes}
+                        {...listeners}
+                        className="flex items-center justify-center w-6 h-6 cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+                    >
+                        <GripVertical className="h-4 w-4" />
+                    </div>
+
+                    <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                            <Badge variant="outline" className="text-xs">
+                                {index + 1}
+                            </Badge>
+                            <span className="font-medium text-slate-900 dark:text-white">
+                                {step.name}
+                            </span>
+                            {step.skip_prompt && (
+                                <Badge className="text-xs">Auto-run</Badge>
+                            )}
+                            {step.terminal && (
+                                <Badge variant="secondary" className="text-xs flex items-center gap-1">
+                                    <Terminal className="h-2 w-2" />
+                                    {step.is_tmux_terminal ? 'Tmux' : 'Terminal'}
+                                </Badge>
+                            )}
+                            {step.is_tmux_terminal && step.tmux_session_name && (
+                                <Badge variant="outline" className="text-xs">
+                                    Session: {step.tmux_session_name}
+                                </Badge>
+                            )}
+                        </div>
+                        <code className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-1 rounded font-mono">
+                            {step.command}
+                        </code>
+                        {step.notes && (
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                                {step.notes}
+                            </p>
+                        )}
+                    </div>
+
+                    <div className="flex gap-1">
+                        <Button
+                            onClick={() => setEditingStepIndex(index)}
+                            variant="outline"
+                            size="sm"
+                            className="p-1"
+                            disabled={loading}
+                        >
+                            <Edit3 className="h-3 w-3" />
+                        </Button>
+                        <Button
+                            onClick={() => handleRemoveStep(index)}
+                            variant="outline"
+                            size="sm"
+                            className="p-1 text-red-600 hover:text-red-700"
+                            disabled={loading}
+                        >
+                            <Trash2 className="h-3 w-3" />
+                        </Button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 const EditFlowModal: React.FC<EditFlowModalProps> = ({ isOpen, onClose, onSubmit, flow }) => {
     const [flowName, setFlowName] = useState('');
     const [flowDescription, setFlowDescription] = useState('');
@@ -66,6 +348,62 @@ const EditFlowModal: React.FC<EditFlowModalProps> = ({ isOpen, onClose, onSubmit
         tmux_session_name: '',
         is_tmux_terminal: false
     });
+
+    // Drag and drop sensors
+    const sensors = useSensors(
+        useSensor(PointerSensor),
+        useSensor(KeyboardSensor, {
+            coordinateGetter: sortableKeyboardCoordinates,
+        })
+    );
+
+    // Handle drag end to reorder steps
+    const handleDragEnd = async (event: DragEndEvent) => {
+        const { active, over } = event;
+
+        if (!over || active.id === over.id) {
+            return;
+        }
+
+        const oldIndex = parseInt(active.id as string);
+        const newIndex = parseInt(over.id as string);
+
+        if (oldIndex !== newIndex) {
+            const reorderedSteps = arrayMove(steps, oldIndex, newIndex);
+            setSteps(reorderedSteps);
+
+            // Update order_index for all affected steps in the backend
+            try {
+                setLoading(true);
+
+                // Update all steps with their new order_index
+                const updatePromises = reorderedSteps.map((step, index) => {
+                    if (step.id) {
+                        return updateStep(step.id, {
+                            name: step.name,
+                            command: step.command,
+                            notes: step.notes || '',
+                            skip_prompt: step.skip_prompt || false,
+                            terminal: step.terminal || false,
+                            tmux_session_name: step.tmux_session_name || '',
+                            is_tmux_terminal: step.is_tmux_terminal || false,
+                            order_index: index
+                        });
+                    }
+                    return Promise.resolve();
+                });
+
+                await Promise.all(updatePromises);
+            } catch (error) {
+                console.error('Failed to update step order:', error);
+                setError('Failed to update step order');
+                // Revert the local state on error
+                setSteps(steps);
+            } finally {
+                setLoading(false);
+            }
+        }
+    };
 
     // Initialize form when flow changes
     useEffect(() => {
@@ -544,191 +882,31 @@ const EditFlowModal: React.FC<EditFlowModalProps> = ({ isOpen, onClose, onSubmit
                                         <div className="space-y-3">
                                             <Separator />
                                             <h4 className="font-medium text-slate-900 dark:text-white">Steps ({steps.length})</h4>
-                                            {steps.map((step, index) => (
-                                                <div key={index} className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-md">
-                                                    {editingStepIndex === index ? (
-                                                        // Edit mode
-                                                        <div className="space-y-3">
-                                                            <div className="grid grid-cols-2 gap-3">
-                                                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                                                                    Step Name
-                                                                </label>
-                                                                <input
-                                                                    type="text"
-                                                                    value={step.name}
-                                                                    onChange={(e) => {
-                                                                        const updatedSteps = [...steps];
-                                                                        updatedSteps[index] = { ...step, name: e.target.value };
-                                                                        setSteps(updatedSteps);
-                                                                    }}
-                                                                    className="px-2 py-1 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                                                    disabled={loading}
-                                                                />
-                                                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                                                                    Command
-                                                                </label>
-                                                                <input
-                                                                    type="text"
-                                                                    value={step.command}
-                                                                    onChange={(e) => {
-                                                                        const updatedSteps = [...steps];
-                                                                        updatedSteps[index] = { ...step, command: e.target.value };
-                                                                        setSteps(updatedSteps);
-                                                                    }}
-                                                                    className="px-2 py-1 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                                                    disabled={loading}
-                                                                />
-                                                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                                                                    Notes (Optional)
-                                                                </label>
-                                                                <textarea
-                                                                    value={step.notes}
-                                                                    onChange={(e) => {
-                                                                        const updatedSteps = [...steps];
-                                                                        updatedSteps[index] = { ...step, notes: e.target.value };
-                                                                        setSteps(updatedSteps);
-                                                                    }}
-                                                                    className="px-2 py-1 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                                                    disabled={loading}
-                                                                />
-                                                                <label className="flex items-center gap-2">
-                                                                    Auto-run
-                                                                </label>
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={step.skip_prompt}
-                                                                    onChange={(e) => {
-                                                                        const updatedSteps = [...steps];
-                                                                        updatedSteps[index] = { ...step, skip_prompt: e.target.checked };
-                                                                        setSteps(updatedSteps);
-                                                                    }}
-                                                                    className="rounded border-slate-300 dark:border-slate-600"
-                                                                    disabled={loading}
-                                                                />
-                                                                <label className="flex items-center gap-2">
-                                                                    Terminal mode
-                                                                </label>
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={step.terminal}
-                                                                    onChange={(e) => {
-                                                                        const updatedSteps = [...steps];
-                                                                        updatedSteps[index] = { ...step, terminal: e.target.checked };
-                                                                        setSteps(updatedSteps);
-                                                                    }}
-                                                                    className="rounded border-slate-300 dark:border-slate-600"
-                                                                    disabled={loading}
-                                                                />
-                                                                <label className="flex items-center gap-2">
-                                                                    Use Tmux Terminal
-                                                                </label>
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={step.is_tmux_terminal}
-                                                                    onChange={(e) => {
-                                                                        const updatedSteps = [...steps];
-                                                                        updatedSteps[index] = { ...step, is_tmux_terminal: e.target.checked };
-                                                                        setSteps(updatedSteps);
-                                                                    }}
-                                                                    className="rounded border-slate-300 dark:border-slate-600"
-                                                                    disabled={loading}
-                                                                />
-                                                                <label className="flex items-center gap-2">
-                                                                    Tmux Session Name
-                                                                </label>
-                                                                <input
-                                                                    type="text"
-                                                                    value={step.tmux_session_name}
-                                                                    onChange={(e) => {
-                                                                        const updatedSteps = [...steps];
-                                                                        updatedSteps[index] = { ...step, tmux_session_name: e.target.value };
-                                                                        setSteps(updatedSteps);
-                                                                    }}
-                                                                    placeholder="e.g., dev-session, ${PROJECT_NAME}"
-                                                                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                                                    disabled={loading}
-                                                                />
-
-                                                            </div>
-                                                            <div className="flex gap-2">
-                                                                <Button
-                                                                    onClick={() => handleUpdateStep(index, step)}
-                                                                    size="sm"
-                                                                    className="flex items-center gap-1"
-                                                                    disabled={loading}
-                                                                >
-                                                                    <Check className="h-3 w-3" />
-                                                                    Save
-                                                                </Button>
-                                                                <Button
-                                                                    onClick={() => setEditingStepIndex(null)}
-                                                                    variant="outline"
-                                                                    size="sm"
-                                                                    disabled={loading}
-                                                                >
-                                                                    Cancel
-                                                                </Button>
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        // View mode
-                                                        <div className="flex items-start justify-between">
-                                                            <div className="flex-1">
-                                                                <div className="flex items-center gap-2 mb-1">
-                                                                    <Badge variant="outline" className="text-xs">
-                                                                        {index + 1}
-                                                                    </Badge>
-                                                                    <span className="font-medium text-slate-900 dark:text-white">
-                                                                        {step.name}
-                                                                    </span>
-                                                                    {step.skip_prompt && (
-                                                                        <Badge className="text-xs">Auto-run</Badge>
-                                                                    )}
-                                                                    {step.terminal && (
-                                                                        <Badge variant="secondary" className="text-xs flex items-center gap-1">
-                                                                            <Terminal className="h-2 w-2" />
-                                                                            {step.is_tmux_terminal ? 'Tmux' : 'Terminal'}
-                                                                        </Badge>
-                                                                    )}
-                                                                    {step.is_tmux_terminal && step.tmux_session_name && (
-                                                                        <Badge variant="outline" className="text-xs">
-                                                                            Session: {step.tmux_session_name}
-                                                                        </Badge>
-                                                                    )}
-                                                                </div>
-                                                                <code className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-1 rounded font-mono">
-                                                                    {step.command}
-                                                                </code>
-                                                                {step.notes && (
-                                                                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                                                                        {step.notes}
-                                                                    </p>
-                                                                )}
-                                                            </div>
-                                                            <div className="flex gap-1">
-                                                                <Button
-                                                                    onClick={() => setEditingStepIndex(index)}
-                                                                    variant="outline"
-                                                                    size="sm"
-                                                                    className="p-1"
-                                                                    disabled={loading}
-                                                                >
-                                                                    <Edit3 className="h-3 w-3" />
-                                                                </Button>
-                                                                <Button
-                                                                    onClick={() => handleRemoveStep(index)}
-                                                                    variant="outline"
-                                                                    size="sm"
-                                                                    className="p-1 text-red-600 hover:text-red-700"
-                                                                    disabled={loading}
-                                                                >
-                                                                    <Trash2 className="h-3 w-3" />
-                                                                </Button>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            ))}
+                                            <DndContext
+                                                sensors={sensors}
+                                                collisionDetection={closestCenter}
+                                                onDragEnd={handleDragEnd}
+                                            >
+                                                <SortableContext
+                                                    items={steps.map((_, index) => index.toString())}
+                                                    strategy={verticalListSortingStrategy}
+                                                >
+                                                    {steps.map((step, index) => (
+                                                        <SortableStepItem
+                                                            key={index}
+                                                            step={step}
+                                                            index={index}
+                                                            editingStepIndex={editingStepIndex}
+                                                            setEditingStepIndex={setEditingStepIndex}
+                                                            steps={steps}
+                                                            setSteps={setSteps}
+                                                            handleUpdateStep={handleUpdateStep}
+                                                            handleRemoveStep={handleRemoveStep}
+                                                            loading={loading}
+                                                        />
+                                                    ))}
+                                                </SortableContext>
+                                            </DndContext>
                                         </div>
                                     )}
                                 </div>
