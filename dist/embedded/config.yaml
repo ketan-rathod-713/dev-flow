@@ -1,0 +1,76 @@
+# DevTool Service Configuration
+service:
+  name: "dev-tool"
+  version: "1.0.0"
+  port: 24050
+  host: "0.0.0.0"
+# Data directories (will be set during installation)
+data:
+  base_dir: "/opt/dev-tool/data"
+  flows_dir: "/opt/dev-tool/data/flows"
+  logs_dir: "/opt/dev-tool/data/logs"
+  temp_dir: "/opt/dev-tool/tmp"
+# Web server configuration
+web:
+  static_dir: "/opt/dev-tool/web"
+  enable_spa: true # Enable Single Page Application routing
+# Security
+security:
+  # CORS settings for development (restrict in production)
+  cors:
+    allowed_origins: ["http://localhost:3000", "http://localhost:8080"]
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowed_headers: ["Origin", "Content-Type", "Accept", "Authorization"]
+# Logging
+logging:
+  level: "info" # debug, info, warn, error
+  format: "json" # json, text
+  output: "both" # file, stdout, both
+  file_path: "/opt/dev-tool/data/logs/dev-tool.log"
+  max_size_mb: 100
+  max_backups: 5
+  max_age_days: 30
+# WebSocket Configuration
+websocket:
+  allowed_origins: ["*"] # Restrict in production
+  read_buffer_size: 1024
+  write_buffer_size: 1024
+# Flow Management
+flows:
+  # Local flow storage
+  local_flows_enabled: true
+  # Default flows directory
+  flows_dir: "/opt/dev-tool/data/flows"
+  # Flow validation
+  validation:
+    max_steps: 50
+    max_command_length: 2000
+    # Add blocked commands for security
+    blocked_commands:
+      - "rm -rf /"
+      - ":(){ :|:& };:"
+      - "dd if=/dev/zero"
+      - "mkfs"
+      - "fdisk"
+# System settings
+system:
+  # Shell configuration
+  shell:
+    default_shell: "/bin/bash"
+    timeout: "30m"
+    max_concurrent: 5
+  # Resource limits
+  limits:
+    max_memory_mb: 512
+    max_cpu_percent: 50
+  # Workspace configuration
+  workspace:
+    # Default working directory for commands (empty means user's home)
+    default_dir: ""
+    # Allowed workspace directories (empty means no restrictions)
+    allowed_dirs: ["/home", "/opt/dev-tool", "/tmp", "/var/tmp"]
+    # Whether to allow access to user's home directory
+    allow_home_access: true
+# Database configuration
+database:
+  path: "/opt/dev-tool/data/flows.db"

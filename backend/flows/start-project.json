@@ -6,10 +6,11 @@
   "steps": [
     {
       "name": "Start Nomad Agent In Dev Mode",
-      "command": "tmux new-session -A -d -s nomad-agent 'nomad agent -dev'",
+      "command": "nomad agent -dev",
       "skip_prompt": true,
       "terminal": true,
-      "is_tmux_terminal": false,
+      "tmux_session_name": "nomad-agent",
+      "is_tmux_terminal": true,
       "order_index": 0
     },
     {
@@ -22,10 +23,11 @@
     },
     {
       "name": "Run All Services",
-      "command": "cd $PROJECT_PATH; docker compose -f docker-compose-dev.yaml up;",
+      "command": "cd $PROJECT_PATH && docker compose -f docker-compose-dev.yaml up",
       "skip_prompt": true,
       "terminal": true,
-      "is_tmux_terminal": false,
+      "tmux_session_name": "docker-services",
+      "is_tmux_terminal": true,
       "order_index": 2
     },
     {

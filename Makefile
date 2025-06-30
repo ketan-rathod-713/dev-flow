@@ -1,5 +1,5 @@
 # DevTool Makefile
-.PHONY: help build build-frontend build-backend clean test install uninstall package dev
+.PHONY: help build build-frontend build-backend clean test install uninstall package dev build-embedded package-embedded build-embedded-package build-separate install-nodejs check-deps build-frontend-embedded-existing build-embedded-existing build-quick install-separate install-embedded
 
 # Configuration
 APP_NAME := dev-tool
@@ -19,8 +19,14 @@ help: ## Show this help message
 	@echo "Available targets:"
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-build: clean build-backend build-frontend package ## Build complete application
-	@echo "✅ Build complete!"
+build: build-embedded-package ## Build single embedded binary (default)
+	@echo "✅ Default build complete! Single binary ready for distribution."
+
+build-separate: clean build-backend build-frontend package ## Build separate binary and static files
+	@echo "✅ Separate build complete!"
+
+build-embedded: clean build-frontend-embedded build-backend-embedded ## Build single embedded binary
+	@echo "✅ Embedded build complete!"
 
 build-backend: ## Build Go backend binary
 	@echo "📦 Building backend..."
@@ -28,6 +34,13 @@ build-backend: ## Build Go backend binary
 	echo "Command Executing: cd backend && GOOS=linux GOARCH=amd64 go build $(BUILD_FLAGS) -o ../$(BUILD_DIR)/bin/$(BINARY_NAME) main.go"
 	@cd backend && GOOS=linux GOARCH=amd64 go build $(BUILD_FLAGS) -o ../$(BUILD_DIR)/bin/$(BINARY_NAME) main.go
 	@echo "✅ Backend built successfully"
+
+build-backend-embedded: ## Build Go backend binary with embedded frontend
+	@echo "📦 Building embedded backend binary..."
+	@mkdir -p $(BUILD_DIR)/bin
+	echo "Command Executing: cd backend && GOOS=linux GOARCH=amd64 go build $(BUILD_FLAGS) -o ../$(BUILD_DIR)/bin/$(BINARY_NAME)-embedded main.go"
+	@cd backend && GOOS=linux GOARCH=amd64 go build $(BUILD_FLAGS) -o ../$(BUILD_DIR)/bin/$(BINARY_NAME)-embedded main.go
+	@echo "✅ Embedded backend built successfully"
 
 build-frontend: ## Build React frontend
 	@echo "🎨 Building frontend..."
@@ -38,12 +51,39 @@ build-frontend: ## Build React frontend
 	@cp -r frontend/dist/* $(BUILD_DIR)/web/
 	@echo "✅ Frontend built successfully"
 
+build-frontend-embedded: ## Build React frontend for embedding
+	@echo "🎨 Building frontend for embedding..."
+	echo "Command Executing: cd frontend && npm ci && npm run build"
+	@cd frontend && npm ci && npm run build
+	echo "Command Executing: rm -rf backend/frontend_dist && mkdir -p backend/frontend_dist"
+	@rm -rf backend/frontend_dist && mkdir -p backend/frontend_dist
+	echo "Command Executing: cp -r frontend/dist/* backend/frontend_dist/"
+	@cp -r frontend/dist/* backend/frontend_dist/
+	@echo "✅ Frontend built for embedding successfully"
+
+build-frontend-embedded-existing: ## Use existing frontend build for embedding
+	@echo "🎨 Using existing frontend build for embedding..."
+	@if [ ! -d "dist/web" ]; then echo "❌ No existing frontend build found in dist/web/"; exit 1; fi
+	echo "Command Executing: rm -rf backend/frontend_dist && mkdir -p backend/frontend_dist"
+	@rm -rf backend/frontend_dist && mkdir -p backend/frontend_dist
+	echo "Command Executing: cp -r dist/web/* backend/frontend_dist/"
+	@cp -r dist/web/* backend/frontend_dist/
+	@echo "✅ Existing frontend copied for embedding successfully"
+
+build-embedded-existing: clean build-frontend-embedded-existing build-backend-embedded ## Build embedded binary using existing frontend
+	@echo "✅ Embedded build complete using existing frontend!"
+
+build-quick: build-embedded-existing package-embedded ## Quick build using existing frontend files
+	@echo "✅ Quick embedded build complete! No Node.js/npm required."
+
 clean: ## Clean build artifacts
 	@echo "🧹 Cleaning build artifacts..."
 	echo "Command Executing: rm -rf $(BUILD_DIR)"
 	@rm -rf $(BUILD_DIR)
 	echo "Command Executing: rm -f $(PACKAGE_NAME).tar.gz"
 	@rm -f $(PACKAGE_NAME).tar.gz
+	echo "Command Executing: rm -rf backend/frontend_dist"
+	@rm -rf backend/frontend_dist
 	@echo "✅ Clean complete"
 
 test: ## Run tests
@@ -85,10 +125,23 @@ package: ## Create deployment package
 	@tar -czf $(PACKAGE_NAME).tar.gz -C $(BUILD_DIR) .
 	@echo "✅ Package created: $(PACKAGE_NAME).tar.gz"
 
-install: build ## Build and install locally
-	@echo "🔧 Installing DevTool locally..."
+install: build ## Build and install locally using embedded binary
+	@echo "🔧 Installing DevTool locally (embedded version)..."
+	@if [ ! -f "$(BUILD_DIR)/embedded/install-embedded.sh" ]; then echo "❌ Embedded installer not found. Run 'make build' first."; exit 1; fi
+	echo "Command Executing: cd $(BUILD_DIR)/embedded && sudo ./install-embedded.sh"
+	@cd $(BUILD_DIR)/embedded && sudo ./install-embedded.sh
+	@echo "✅ Installation complete"
+
+install-separate: build-separate ## Build and install using separate binary + static files
+	@echo "🔧 Installing DevTool locally (separate version)..."
 	echo "Command Executing: sudo ./$(BUILD_DIR)/scripts/install.sh"
 	@sudo ./$(BUILD_DIR)/scripts/install.sh
+	@echo "✅ Installation complete"
+
+install-embedded: build-embedded-package ## Build and install embedded binary
+	@echo "🔧 Installing DevTool locally (embedded version)..."
+	echo "Command Executing: cd $(BUILD_DIR)/embedded && sudo ./install-embedded.sh"
+	@cd $(BUILD_DIR)/embedded && sudo ./install-embedded.sh
 	@echo "✅ Installation complete"
 
 uninstall: ## Uninstall DevTool service
@@ -178,12 +231,103 @@ info: ## Show build information
 	@echo "  Node Version: $(shell node --version 2>/dev/null || echo 'Not installed')"
 
 # Quick development setup
-setup: deps ## Setup development environment
+setup: ## Setup development environment
 	@echo "🛠️  Setting up development environment..."
+	@echo "Checking dependencies..."
+	@which node >/dev/null 2>&1 || (echo "❌ Node.js not found. Run 'make install-nodejs' first." && exit 1)
+	@which npm >/dev/null 2>&1 || (echo "❌ npm not found. Run 'make install-nodejs' first." && exit 1)
+	@which go >/dev/null 2>&1 || (echo "❌ Go not found. Please install Go first." && exit 1)
+	@echo "✅ All dependencies found"
 	@mkdir -p backend/flows backend/logs
 	@echo "✅ Development environment ready"
 	@echo ""
 	@echo "Next steps:"
+	@echo "  make build        # Build single embedded binary (recommended)"
+	@echo "  make build-separate # Build separate binary + static files"
 	@echo "  make dev          # Start development servers"
-	@echo "  make build        # Build for production"
-	@echo "  make install      # Install as system service" 
+	@echo "  make install      # Install as system service"
+
+install-nodejs: ## Install Node.js and npm (Ubuntu/Debian)
+	@echo "📥 Installing Node.js and npm..."
+	@echo "This will install Node.js LTS version..."
+	@sudo apt update
+	@curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+	@sudo apt-get install -y nodejs
+	@echo "✅ Node.js and npm installed"
+	@echo "Versions:"
+	@node --version
+	@npm --version
+
+check-deps: ## Check if all dependencies are installed
+	@echo "🔍 Checking dependencies..."
+	@echo -n "Go: "
+	@which go >/dev/null 2>&1 && go version || echo "❌ Not found"
+	@echo -n "Node.js: "
+	@which node >/dev/null 2>&1 && node --version || echo "❌ Not found"
+	@echo -n "npm: "
+	@which npm >/dev/null 2>&1 && npm --version || echo "❌ Not found"
+	@echo -n "make: "
+	@which make >/dev/null 2>&1 && make --version | head -1 || echo "❌ Not found"
+
+package-embedded: ## Create single binary package for distribution
+	@echo "📦 Creating embedded binary package..."
+	echo "Command Executing: mkdir -p $(BUILD_DIR)/embedded"
+	@mkdir -p $(BUILD_DIR)/embedded
+	echo "Command Executing: cp $(BUILD_DIR)/bin/$(BINARY_NAME)-embedded $(BUILD_DIR)/embedded/$(BINARY_NAME)"
+	@cp $(BUILD_DIR)/bin/$(BINARY_NAME)-embedded $(BUILD_DIR)/embedded/$(BINARY_NAME)
+	echo "Command Executing: cp config.yaml $(BUILD_DIR)/embedded/"
+	@cp config.yaml $(BUILD_DIR)/embedded/
+	echo "Command Executing: cp install-embedded.sh $(BUILD_DIR)/embedded/"
+	@cp install-embedded.sh $(BUILD_DIR)/embedded/
+	@chmod +x $(BUILD_DIR)/embedded/install-embedded.sh
+	echo "Command Executing: cp -r backend/flows $(BUILD_DIR)/embedded/ 2>/dev/null || echo "No flows directory found""
+	@cp -r backend/flows $(BUILD_DIR)/embedded/ 2>/dev/null || echo "No flows directory found"
+	
+	# Create a simple README for the distribution
+	@echo "Creating distribution README..."
+	@echo "# DevTool v$(VERSION) - Single Binary Distribution" > $(BUILD_DIR)/embedded/README.md
+	@echo "" >> $(BUILD_DIR)/embedded/README.md
+	@echo "This package contains a single binary with embedded frontend." >> $(BUILD_DIR)/embedded/README.md
+	@echo "" >> $(BUILD_DIR)/embedded/README.md
+	@echo "## Quick Start (Standalone):" >> $(BUILD_DIR)/embedded/README.md
+	@echo "1. Make binary executable: \`chmod +x $(BINARY_NAME)\`" >> $(BUILD_DIR)/embedded/README.md
+	@echo "2. Run: \`./$(BINARY_NAME) --config=config.yaml\`" >> $(BUILD_DIR)/embedded/README.md
+	@echo "3. Open browser: http://localhost:24050" >> $(BUILD_DIR)/embedded/README.md
+	@echo "" >> $(BUILD_DIR)/embedded/README.md
+	@echo "## System Service Installation:" >> $(BUILD_DIR)/embedded/README.md
+	@echo "1. Run installer: \`sudo ./install-embedded.sh\`" >> $(BUILD_DIR)/embedded/README.md
+	@echo "2. Start service: \`sudo systemctl start dev-tool\`" >> $(BUILD_DIR)/embedded/README.md
+	@echo "3. Open browser: http://localhost:24050" >> $(BUILD_DIR)/embedded/README.md
+	@echo "" >> $(BUILD_DIR)/embedded/README.md
+	@echo "## Files:" >> $(BUILD_DIR)/embedded/README.md
+	@echo "- \`$(BINARY_NAME)\` - Main executable (contains frontend + backend)" >> $(BUILD_DIR)/embedded/README.md
+	@echo "- \`config.yaml\` - Configuration file" >> $(BUILD_DIR)/embedded/README.md
+	@echo "- \`install-embedded.sh\` - System service installer" >> $(BUILD_DIR)/embedded/README.md
+	@echo "- \`flows/\` - Sample flows (if any)" >> $(BUILD_DIR)/embedded/README.md
+	@echo "" >> $(BUILD_DIR)/embedded/README.md
+	@echo "## Requirements:" >> $(BUILD_DIR)/embedded/README.md
+	@echo "- Linux x86_64" >> $(BUILD_DIR)/embedded/README.md
+	@echo "- No external dependencies required!" >> $(BUILD_DIR)/embedded/README.md
+	
+	echo "Command Executing: tar -czf $(PACKAGE_NAME)-embedded.tar.gz -C $(BUILD_DIR)/embedded ."
+	@tar -czf $(PACKAGE_NAME)-embedded.tar.gz -C $(BUILD_DIR)/embedded .
+	@echo "✅ Embedded package created: $(PACKAGE_NAME)-embedded.tar.gz"
+	@echo ""
+	@echo "📋 Single Binary Distribution Ready:"
+	@echo "  📦 Package: $(PACKAGE_NAME)-embedded.tar.gz"
+	@echo "  📏 Size: $(shell du -h $(PACKAGE_NAME)-embedded.tar.gz 2>/dev/null | cut -f1 || echo 'Unknown')"
+	@echo "  🎯 Binary: $(BUILD_DIR)/embedded/$(BINARY_NAME)"
+	@echo "  📄 Binary Size: $(shell du -h $(BUILD_DIR)/embedded/$(BINARY_NAME) 2>/dev/null | cut -f1 || echo 'Unknown')"
+	@echo ""
+	@echo "🚀 To test locally:"
+	@echo "  cd $(BUILD_DIR)/embedded && ./$(BINARY_NAME) --config=config.yaml"
+	@echo ""
+	@echo "📤 To share with others:"
+	@echo "  1. Send them: $(PACKAGE_NAME)-embedded.tar.gz"
+	@echo "  2. They extract: tar -xzf $(PACKAGE_NAME)-embedded.tar.gz"
+	@echo "  3. Quick run: ./$(BINARY_NAME) --config=config.yaml"
+	@echo "  4. Or install as service: sudo ./install-embedded.sh"
+
+# Add convenience target for full embedded build and package
+build-embedded-package: build-embedded package-embedded ## Build and package embedded binary
+	@echo "✅ Complete embedded build and package ready!" 

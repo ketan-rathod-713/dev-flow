@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"database/sql"
+	"embed"
 	"encoding/base64"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -23,6 +25,11 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"gopkg.in/yaml.v2"
 )
+
+// Embed the frontend build files (will be populated during build)
+//
+//go:embed all:frontend_dist
+var embeddedFiles embed.FS
 
 // Version information (set during build)
 var version = "dev"
@@ -1058,24 +1065,79 @@ func getFlows(c echo.Context) error {
 
 // setupStaticFileServer sets up static file serving for the web interface
 func setupStaticFileServer(e *echo.Echo) {
-	// Serve static files from the web directory
-	staticDir := config.Web.StaticDir
-	if staticDir == "" {
-		staticDir = "./web"
+	// Try to use embedded files first, fall back to filesystem
+	var staticFS fs.FS
+	var useEmbedded bool
+
+	// Check if we have embedded files
+	if _, err := embeddedFiles.Open("frontend_dist"); err == nil {
+		if subFS, err := fs.Sub(embeddedFiles, "frontend_dist"); err == nil {
+			staticFS = subFS
+			useEmbedded = true
+			log.Println("Using embedded frontend files")
+		}
 	}
 
-	// Check if static directory exists
-	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
-		log.Printf("Warning: Static directory %s does not exist", staticDir)
-		return
+	// Fall back to filesystem serving
+	if !useEmbedded {
+		staticDir := config.Web.StaticDir
+		if staticDir == "" {
+			staticDir = "./web"
+		}
+
+		// Check if static directory exists
+		if _, err := os.Stat(staticDir); os.IsNotExist(err) {
+			log.Printf("Warning: Static directory %s does not exist", staticDir)
+			return
+		}
+
+		staticFS = os.DirFS(staticDir)
+		log.Printf("Using filesystem static files from %s", staticDir)
 	}
 
 	// Serve static assets (CSS, JS, images, etc.) with proper headers
-	e.Static("/assets", filepath.Join(staticDir, "assets"))
+	if useEmbedded {
+		e.GET("/assets/*", echo.WrapHandler(http.FileServer(http.FS(staticFS))))
+	} else {
+		staticDir := config.Web.StaticDir
+		if staticDir == "" {
+			staticDir = "./web"
+		}
+		e.Static("/assets", filepath.Join(staticDir, "assets"))
+	}
 
 	// Serve other static files like favicon, manifest, etc.
-	e.File("/favicon.ico", filepath.Join(staticDir, "favicon.ico"))
-	e.File("/vite.svg", filepath.Join(staticDir, "vite.svg"))
+	e.GET("/favicon.ico", func(c echo.Context) error {
+		if useEmbedded {
+			if file, err := staticFS.Open("favicon.ico"); err == nil {
+				defer file.Close()
+				return c.Stream(http.StatusOK, "image/x-icon", file)
+			}
+		} else {
+			staticDir := config.Web.StaticDir
+			if staticDir == "" {
+				staticDir = "./web"
+			}
+			return c.File(filepath.Join(staticDir, "favicon.ico"))
+		}
+		return echo.ErrNotFound
+	})
+
+	e.GET("/vite.svg", func(c echo.Context) error {
+		if useEmbedded {
+			if file, err := staticFS.Open("vite.svg"); err == nil {
+				defer file.Close()
+				return c.Stream(http.StatusOK, "image/svg+xml", file)
+			}
+		} else {
+			staticDir := config.Web.StaticDir
+			if staticDir == "" {
+				staticDir = "./web"
+			}
+			return c.File(filepath.Join(staticDir, "vite.svg"))
+		}
+		return echo.ErrNotFound
+	})
 
 	// SPA support - serve index.html for all non-API, non-asset routes
 	if config.Web.EnableSPA {
@@ -1108,13 +1170,37 @@ func setupStaticFileServer(e *echo.Echo) {
 			}
 
 			// Serve index.html for all other routes (SPA routing)
-			return c.File(filepath.Join(staticDir, "index.html"))
+			if useEmbedded {
+				if file, err := staticFS.Open("index.html"); err == nil {
+					defer file.Close()
+					return c.Stream(http.StatusOK, "text/html", file)
+				}
+			} else {
+				staticDir := config.Web.StaticDir
+				if staticDir == "" {
+					staticDir = "./web"
+				}
+				return c.File(filepath.Join(staticDir, "index.html"))
+			}
+			return echo.ErrNotFound
 		})
 	}
 
 	// Serve index.html at root
 	e.GET("/", func(c echo.Context) error {
-		return c.File(filepath.Join(staticDir, "index.html"))
+		if useEmbedded {
+			if file, err := staticFS.Open("index.html"); err == nil {
+				defer file.Close()
+				return c.Stream(http.StatusOK, "text/html", file)
+			}
+		} else {
+			staticDir := config.Web.StaticDir
+			if staticDir == "" {
+				staticDir = "./web"
+			}
+			return c.File(filepath.Join(staticDir, "index.html"))
+		}
+		return echo.ErrNotFound
 	})
 }
 
