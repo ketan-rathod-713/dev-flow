@@ -63,3 +63,14 @@ system:
   limits:
     max_memory_mb: 512
     max_cpu_percent: 50
+  # Workspace configuration
+  workspace:
+    # Default working directory for commands (empty means user's home)
+    default_dir: ""
+    # Allowed workspace directories (empty means no restrictions)
+    allowed_dirs: ["/home", "/opt/dev-tool", "/tmp", "/var/tmp"]
+    # Whether to allow access to user's home directory
+    allow_home_access: true
+# Database configuration
+database:
+  path: "/opt/dev-tool/data/flows.db"

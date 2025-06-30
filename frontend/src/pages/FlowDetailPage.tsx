@@ -313,7 +313,7 @@ const FlowDetailPage = () => {
                                 <RotateCcw className="h-4 w-4 mr-2" />
                                 Try Again
                             </Button>
-                            <Link to="/flows">
+                            <Link to="/">
                                 <Button variant="outline">
                                     <ArrowLeft className="h-4 w-4 mr-2" />
                                     Back to Flows
@@ -338,7 +338,7 @@ const FlowDetailPage = () => {
                         <p className="text-slate-600 dark:text-slate-300 mb-4">
                             The flow "{decodedFlowName}" could not be found.
                         </p>
-                        <Link to="/flows">
+                        <Link to="/">
                             <Button>
                                 <ArrowLeft className="h-4 w-4 mr-2" />
                                 Back to Flows
@@ -394,7 +394,7 @@ const FlowDetailPage = () => {
                 <div className="mb-8">
                     <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-4">
-                            <Link to="/flows">
+                            <Link to="/">
                                 <Button variant="outline" size="sm">
                                     <ArrowLeft className="h-4 w-4 mr-2" />
                                     Back to Flows

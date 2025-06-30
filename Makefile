@@ -111,8 +111,19 @@ status: ## Check service status
 	@systemctl is-active $(APP_NAME) >/dev/null 2>&1 && echo "Status: ✅ Running" || echo "Status: ❌ Stopped"
 	echo "Command Executing: systemctl is-enabled $(APP_NAME) >/dev/null 2>&1 && echo "Auto-start: ✅ Enabled" || echo "Auto-start: ❌ Disabled""
 	@systemctl is-enabled $(APP_NAME) >/dev/null 2>&1 && echo "Auto-start: ✅ Enabled" || echo "Auto-start: ❌ Disabled"
-	@echo "Port: 8080"
-	@echo "Web UI: http://localhost:8080"
+	@echo "Port: 24050"
+	@echo "Web UI: http://localhost:24050"
+
+diagnose: ## Run diagnostics to check file permissions and access
+	@echo "🔍 Running DevTool Diagnostics..."
+	@echo "Checking service status..."
+	@systemctl is-active $(APP_NAME) >/dev/null 2>&1 && echo "✅ Service is running" || echo "❌ Service is not running"
+	@echo ""
+	@echo "Checking API diagnostics endpoint..."
+	@curl -s http://localhost:24050/api/diagnostics | python3 -m json.tool 2>/dev/null || echo "❌ Could not reach diagnostics endpoint"
+	@echo ""
+	@echo "Recent service logs:"
+	@journalctl -u $(APP_NAME) --no-pager -n 20 || echo "❌ Could not read service logs"
 
 logs: ## View service logs
 	@echo "📋 DevTool Service Logs:"

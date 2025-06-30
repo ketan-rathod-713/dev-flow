@@ -134,6 +134,25 @@ chmod 755 "$INSTALL_DIR"
 chmod 750 "$INSTALL_DIR/data"
 chmod 755 "$INSTALL_DIR/bin/dev-tool"
 
+# Ensure user home directory has proper permissions for the service
+print_status "Setting up workspace access..."
+if [ -d "/home/$USER" ]; then
+    # Add the service user to the user's group for file access
+    usermod -a -G "$USER" "$USER" 2>/dev/null || true
+
+    # Ensure the user's home directory is accessible
+    chmod 755 "/home/$USER" 2>/dev/null || true
+
+    print_status "Workspace access configured for /home/$USER"
+else
+    print_warning "User home directory /home/$USER not found"
+fi
+
+# Create additional directories that might be needed
+mkdir -p "/tmp/dev-tool" "/var/tmp/dev-tool"
+chown "$USER:$GROUP" "/tmp/dev-tool" "/var/tmp/dev-tool"
+chmod 755 "/tmp/dev-tool" "/var/tmp/dev-tool"
+
 # Create systemd service file
 print_status "Creating systemd service..."
 cat >"/etc/systemd/system/$SERVICE_NAME.service" <<EOF
@@ -156,18 +175,27 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=$SERVICE_NAME
 
-# Security settings
+# Security settings - Relaxed for development tool usage
 NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=$INSTALL_DIR/data $INSTALL_DIR/tmp
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+PrivateTmp=false
+ProtectSystem=false
+ProtectHome=false
+ReadWritePaths=/home /opt/$SERVICE_NAME /tmp /var/tmp
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE
+
+# Allow access to common development directories
+BindReadOnlyPaths=/usr/bin /usr/local/bin
+BindPaths=/home/$USER
 
 # Resource limits
 LimitNOFILE=65536
 LimitNPROC=4096
-MemoryLimit=512M
+MemoryLimit=1G
+
+# Environment variables
+Environment=HOME=/home/$USER
+Environment=USER=$USER
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 [Install]
 WantedBy=multi-user.target
@@ -198,12 +226,28 @@ if systemctl is-active --quiet "$SERVICE_NAME"; then
     echo "📂 Data Directory: $INSTALL_DIR/data"
     echo "⚙️  Configuration: $INSTALL_DIR/config/config.yaml"
     echo ""
+    echo "🔍 Diagnostic Commands:"
+    echo "  curl http://localhost:24050/api/health          # Check service health"
+    echo "  curl http://localhost:24050/api/diagnostics     # Check file permissions"
+    echo "  make diagnose                                   # Run full diagnostics"
+    echo ""
     echo "📋 Useful Commands:"
     echo "  sudo systemctl status $SERVICE_NAME     # Check service status"
     echo "  sudo systemctl restart $SERVICE_NAME    # Restart service"
     echo "  sudo systemctl stop $SERVICE_NAME       # Stop service"
     echo "  journalctl -u $SERVICE_NAME -f          # View logs"
     echo "  sudo systemctl disable $SERVICE_NAME    # Disable auto-start"
+    echo ""
+    echo "🏠 Workspace Access:"
+    echo "  Home Directory: /home/$USER"
+    echo "  Working Directory: /home/$USER (default)"
+    echo "  Allowed Directories: /home, /opt/dev-tool, /tmp, /var/tmp"
+    echo ""
+    echo "🚨 If you experience file permission issues:"
+    echo "  1. Check diagnostics: curl http://localhost:24050/api/diagnostics"
+    echo "  2. Verify home directory permissions: ls -la /home/$USER"
+    echo "  3. Check service logs: journalctl -u $SERVICE_NAME -f"
+    echo "  4. Ensure user $USER exists and has proper permissions"
     echo ""
     echo "🔧 To uninstall:"
     echo "  sudo systemctl stop $SERVICE_NAME && sudo systemctl disable $SERVICE_NAME"

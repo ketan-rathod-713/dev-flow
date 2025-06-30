@@ -1,0 +1,42 @@
+{
+  "name": "Iceline Hosting Project",
+  "variables": {
+    "PROJECT_PATH": "/home/bacancy/Desktop/backend-monorepo"
+  },
+  "steps": [
+    {
+      "name": "Start Nomad Agent In Dev Mode",
+      "command": "tmux new-session -A -d -s nomad-agent 'nomad agent -dev'",
+      "skip_prompt": true,
+      "terminal": true,
+      "is_tmux_terminal": false,
+      "order_index": 0
+    },
+    {
+      "name": "Run Nomad Minio Job",
+      "command": "nomad job run $PROJECT_PATH/documents/nomad/minio.hcl",
+      "skip_prompt": true,
+      "terminal": false,
+      "is_tmux_terminal": false,
+      "order_index": 1
+    },
+    {
+      "name": "Run All Services",
+      "command": "cd $PROJECT_PATH; docker compose -f docker-compose-dev.yaml up;",
+      "skip_prompt": true,
+      "terminal": true,
+      "is_tmux_terminal": false,
+      "order_index": 2
+    },
+    {
+      "name": "Check Postsgresql Status",
+      "command": "systemctl status postgresql.service",
+      "skip_prompt": true,
+      "terminal": false,
+      "is_tmux_terminal": false,
+      "order_index": 3
+    }
+  ],
+  "exported_at": "2025-06-29T15:54:38.133024922+05:30",
+  "version": "dev"
+}

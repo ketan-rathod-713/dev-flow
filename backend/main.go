@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -104,8 +105,9 @@ type ValidationConfig struct {
 }
 
 type SystemConfig struct {
-	Shell  ShellConfig  `yaml:"shell"`
-	Limits LimitsConfig `yaml:"limits"`
+	Shell     ShellConfig     `yaml:"shell"`
+	Limits    LimitsConfig    `yaml:"limits"`
+	Workspace WorkspaceConfig `yaml:"workspace"`
 }
 
 type ShellConfig struct {
@@ -117,6 +119,12 @@ type ShellConfig struct {
 type LimitsConfig struct {
 	MaxMemoryMB   int `yaml:"max_memory_mb"`
 	MaxCPUPercent int `yaml:"max_cpu_percent"`
+}
+
+type WorkspaceConfig struct {
+	DefaultDir      string   `yaml:"default_dir"`
+	AllowedDirs     []string `yaml:"allowed_dirs"`
+	AllowHomeAccess bool     `yaml:"allow_home_access"`
 }
 
 // Global configuration
@@ -286,19 +294,56 @@ func isCommandBlocked(command string) bool {
 	return false
 }
 
-// executeCommand executes a shell command and returns the result
-func executeCommand(command string, variables map[string]string) CommandResult {
-	startTime := time.Now()
+// getUserHomeDir returns the user's home directory
+func getUserHomeDir() string {
+	if home := os.Getenv("HOME"); home != "" {
+		return home
+	}
+	// Fallback for the service user
+	return "/home/bacancy"
+}
 
-	// Add Env variables to the shell
+// setupCommandEnvironment sets up proper environment and working directory for commands
+func setupCommandEnvironment(cmd *exec.Cmd, variables map[string]string) {
+	// Get user home directory
+	homeDir := getUserHomeDir()
+
+	// Determine working directory based on configuration
+	workingDir := homeDir // Default to home directory
+	if config != nil && config.System.Workspace.DefaultDir != "" {
+		workingDir = config.System.Workspace.DefaultDir
+	}
+
+	// Set working directory
+	cmd.Dir = workingDir
+
+	// Set up environment variables
 	env := os.Environ()
+
+	// Ensure essential environment variables are set
+	env = append(env, fmt.Sprintf("HOME=%s", homeDir))
+	env = append(env, fmt.Sprintf("USER=%s", os.Getenv("USER")))
+	env = append(env, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+
+	// Add flow variables
 	for key, value := range variables {
 		env = append(env, fmt.Sprintf("%s=%s", key, value))
 	}
 
+	cmd.Env = env
+
+	log.Printf("Command environment setup - Working Dir: %s, Home: %s", workingDir, homeDir)
+}
+
+// executeCommand executes a shell command and returns the result
+func executeCommand(command string, variables map[string]string) CommandResult {
+	startTime := time.Now()
+
 	// Execute the command
 	cmd := exec.Command("bash", "-c", command)
-	cmd.Env = env
+
+	// Setup environment and working directory
+	setupCommandEnvironment(cmd, variables)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -307,6 +352,7 @@ func executeCommand(command string, variables map[string]string) CommandResult {
 	err := cmd.Run()
 
 	log.Printf("Command: %s", command)
+	log.Printf("Working Directory: %s", cmd.Dir)
 	log.Printf("Variables: %+v", variables)
 
 	duration := time.Since(startTime)
@@ -367,12 +413,13 @@ func handleShellWebSocket(c echo.Context) error {
 
 	// Get step ID from query parameter and fetch variables from database
 	var variables map[string]string
+	var step *StepDB
 	stepIDParam := c.QueryParam("step_id")
 	if stepIDParam != "" {
 		stepID := 0
 		if _, err := fmt.Sscanf(stepIDParam, "%d", &stepID); err == nil {
 			// Get step details to get flow ID
-			step, err := getStepByID(stepID)
+			step, err = getStepByID(stepID)
 			if err != nil {
 				log.Printf("WebSocket: Failed to get step %d: %v", stepID, err)
 			} else {
@@ -400,22 +447,46 @@ func handleShellWebSocket(c echo.Context) error {
 
 	// Start bash with PTY
 	shell := config.System.Shell.DefaultShell
+	var shellArgs []string = make([]string, 0)
 	if shell == "" {
 		shell = "/bin/bash"
 	}
-	cmd := exec.Command(shell)
 
-	// Set environment variables for the shell
-	env := os.Environ()
-	for key, value := range variables {
-		env = append(env, fmt.Sprintf("%s=%s", key, value))
+	if step != nil && step.IsTmuxTerminal {
+		if step.TmuxSessionName == "" {
+			step.TmuxSessionName = "flows_session"
+		}
+
+		// First, ensure the tmux session exists
+		log.Printf("Setting up tmux session: %s", step.TmuxSessionName)
+		checkCmd := exec.Command("tmux", "has-session", "-t", step.TmuxSessionName)
+		setupCommandEnvironment(checkCmd, variables)
+
+		if err := checkCmd.Run(); err != nil {
+			// Session doesn't exist, create it
+			log.Printf("Creating new tmux session: %s", step.TmuxSessionName)
+			createCmd := exec.Command("tmux", "new-session", "-d", "-s", step.TmuxSessionName)
+			setupCommandEnvironment(createCmd, variables)
+			if err := createCmd.Run(); err != nil {
+				log.Printf("Failed to create tmux session %s: %v", step.TmuxSessionName, err)
+				return fmt.Errorf("failed to create tmux session: %v", err)
+			}
+		}
+
+		// Attach to the existing session
+		shell = "tmux"
+		shellArgs = append(shellArgs, "attach-session", "-t", step.TmuxSessionName)
 	}
 
-	env = append(env, "TERM=xterm-256color")
-	env = append(env, "COLORTERM=truecolor")
-	env = append(env, "COLORFGBG=15;0")
-	env = append(env, "HOME=/home/bacancy")
-	cmd.Env = env
+	cmd := exec.Command(shell, shellArgs...)
+
+	// Set environment variables for the shell using the new setup function
+	setupCommandEnvironment(cmd, variables)
+
+	// Add additional terminal-specific environment variables
+	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
+	cmd.Env = append(cmd.Env, "COLORTERM=truecolor")
+	cmd.Env = append(cmd.Env, "COLORFGBG=15;0")
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -443,6 +514,12 @@ func handleShellWebSocket(c echo.Context) error {
 		if len(variables) > 0 {
 			log.Printf("Original command: %s", command)
 			log.Printf("Variables: %+v", variables)
+		}
+
+		if step != nil && step.IsTmuxTerminal {
+			// For tmux sessions, we need to wait a moment for the session to be ready
+			// then send the command
+			time.Sleep(100 * time.Millisecond)
 		}
 
 		_, err := ptmx.Write([]byte(finalCommand + "\n"))
@@ -766,23 +843,18 @@ func executeCommandWithTmux(command string, variables map[string]string, tmuxSes
 		}
 	}
 
-	// Prepare environment variables
-	env := os.Environ()
-	for key, value := range variables {
-		env = append(env, fmt.Sprintf("%s=%s", key, value))
-	}
-
 	var cmd *exec.Cmd
+	var stdout, stderr bytes.Buffer
 
 	if isTmuxTerminal && tmuxSessionName != "" {
 		// Check if tmux session exists
 		checkCmd := exec.Command("tmux", "has-session", "-t", tmuxSessionName)
-		checkCmd.Env = env
+		setupCommandEnvironment(checkCmd, variables)
 		if err := checkCmd.Run(); err != nil {
 			// Session doesn't exist, create it
 			log.Printf("Creating tmux session: %s", tmuxSessionName)
 			createCmd := exec.Command("tmux", "new-session", "-d", "-s", tmuxSessionName)
-			createCmd.Env = env
+			setupCommandEnvironment(createCmd, variables)
 			if err := createCmd.Run(); err != nil {
 				log.Printf("Failed to create tmux session %s: %v", tmuxSessionName, err)
 				return CommandResult{
@@ -797,20 +869,84 @@ func executeCommandWithTmux(command string, variables map[string]string, tmuxSes
 			}
 		}
 
-		// Execute command in tmux session
-		cmd = exec.Command("tmux", "send-keys", "-t", tmuxSessionName, finalCommand, "Enter")
-		log.Printf("Executing in tmux session %s: %s", tmuxSessionName, finalCommand)
+		// For tmux execution, we'll use a different approach:
+		// 1. Send the command to the session
+		// 2. Capture the output by running the command in a way that returns results
+
+		// Create a script that will execute the command and capture output
+		tempScript := fmt.Sprintf("/tmp/devtool_tmux_%d.sh", time.Now().UnixNano())
+		scriptContent := fmt.Sprintf(`#!/bin/bash
+set -e
+cd "%s"
+%s
+`, getUserHomeDir(), finalCommand)
+
+		if err := os.WriteFile(tempScript, []byte(scriptContent), 0755); err != nil {
+			log.Printf("Failed to create temp script: %v", err)
+			return CommandResult{
+				Command:    command,
+				ExitCode:   -1,
+				Stdout:     "",
+				Stderr:     fmt.Sprintf("Failed to create temp script: %v", err),
+				Duration:   time.Since(start),
+				Success:    false,
+				ExecutedAt: start,
+			}
+		}
+		defer os.Remove(tempScript)
+
+		// Execute the script in the tmux session and capture output
+		cmd = exec.Command("tmux", "send-keys", "-t", tmuxSessionName, fmt.Sprintf("bash %s", tempScript), "Enter")
+		setupCommandEnvironment(cmd, variables)
+
+		// Send the command to tmux session
+		if err := cmd.Run(); err != nil {
+			log.Printf("Failed to send command to tmux session: %v", err)
+			return CommandResult{
+				Command:    command,
+				ExitCode:   -1,
+				Stdout:     "",
+				Stderr:     fmt.Sprintf("Failed to send command to tmux session: %v", err),
+				Duration:   time.Since(start),
+				Success:    false,
+				ExecutedAt: start,
+			}
+		}
+
+		// Wait a moment for command to execute
+		time.Sleep(500 * time.Millisecond)
+
+		// Capture the session output (this is a simplified approach)
+		captureCmd := exec.Command("tmux", "capture-pane", "-t", tmuxSessionName, "-p")
+		setupCommandEnvironment(captureCmd, variables)
+		output, err := captureCmd.Output()
+
+		if err != nil {
+			log.Printf("Failed to capture tmux output: %v", err)
+			stdout.WriteString(fmt.Sprintf("Command sent to tmux session '%s': %s", tmuxSessionName, finalCommand))
+		} else {
+			stdout.Write(output)
+		}
+
+		log.Printf("Command sent to tmux session %s: %s", tmuxSessionName, finalCommand)
+
+		// For tmux commands, we assume success since we can't easily get exit codes
+		return CommandResult{
+			Command:    command,
+			ExitCode:   0,
+			Stdout:     stdout.String(),
+			Stderr:     stderr.String(),
+			Duration:   time.Since(start),
+			Success:    true,
+			ExecutedAt: start,
+		}
 	} else {
 		// Regular command execution
 		cmd = exec.Command("/bin/bash", "-c", finalCommand)
+		setupCommandEnvironment(cmd, variables)
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
 	}
-
-	// Set environment variables for the command
-	cmd.Env = env
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
 
 	err := cmd.Run()
 	duration := time.Since(start)
@@ -1519,6 +1655,88 @@ func handleImportFlow(c echo.Context) error {
 	})
 }
 
+// Health check endpoint
+func handleHealthCheck(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  "healthy",
+		"version": version,
+		"service": config.Service.Name,
+	})
+}
+
+// Diagnostic endpoint for troubleshooting permissions
+func handleDiagnostics(c echo.Context) error {
+	homeDir := getUserHomeDir()
+	workingDir := homeDir
+	if config != nil && config.System.Workspace.DefaultDir != "" {
+		workingDir = config.System.Workspace.DefaultDir
+	}
+
+	// Test file access in key directories
+	testDirs := []string{homeDir, workingDir, "/tmp", "/opt/dev-tool"}
+	dirAccess := make(map[string]interface{})
+
+	for _, dir := range testDirs {
+		info := map[string]interface{}{
+			"exists":   false,
+			"readable": false,
+			"writable": false,
+			"error":    nil,
+		}
+
+		if stat, err := os.Stat(dir); err == nil {
+			info["exists"] = true
+			info["mode"] = stat.Mode().String()
+			info["owner"] = fmt.Sprintf("%d:%d", stat.Sys().(*syscall.Stat_t).Uid, stat.Sys().(*syscall.Stat_t).Gid)
+
+			// Test read access
+			if file, err := os.Open(dir); err == nil {
+				info["readable"] = true
+				file.Close()
+			} else {
+				info["read_error"] = err.Error()
+			}
+
+			// Test write access by creating a temp file
+			testFile := filepath.Join(dir, ".devtool-test")
+			if file, err := os.Create(testFile); err == nil {
+				info["writable"] = true
+				file.Close()
+				os.Remove(testFile)
+			} else {
+				info["write_error"] = err.Error()
+			}
+		} else {
+			info["error"] = err.Error()
+		}
+
+		dirAccess[dir] = info
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"service": map[string]interface{}{
+			"version":     version,
+			"user":        os.Getenv("USER"),
+			"home":        homeDir,
+			"working_dir": workingDir,
+			"pid":         os.Getpid(),
+			"uid":         os.Getuid(),
+			"gid":         os.Getgid(),
+		},
+		"environment": map[string]string{
+			"HOME": os.Getenv("HOME"),
+			"USER": os.Getenv("USER"),
+			"PATH": os.Getenv("PATH"),
+			"PWD":  os.Getenv("PWD"),
+		},
+		"directory_access": dirAccess,
+		"config": map[string]interface{}{
+			"workspace_config": config.System.Workspace,
+			"data_dirs":        config.Data,
+		},
+	})
+}
+
 func main() {
 	// Command line flags
 	var (
@@ -1602,13 +1820,10 @@ func main() {
 	api.POST("/execute-command", handleCommandExecution)
 
 	// Health check endpoint
-	api.GET("/health", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"status":  "healthy",
-			"version": version,
-			"service": config.Service.Name,
-		})
-	})
+	api.GET("/health", handleHealthCheck)
+
+	// Diagnostic endpoint for troubleshooting permissions
+	api.GET("/diagnostics", handleDiagnostics)
 
 	// New handlers for editing
 	api.PUT("/flows/:id", handleUpdateFlow)

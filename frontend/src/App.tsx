@@ -7,7 +7,6 @@ function App() {
     <Router>
       <Routes>
         <Route path="/" element={<FlowsPage />} />
-        <Route path="/flows" element={<FlowsPage />} />
         <Route path="/flow/:flowName" element={<FlowDetailPage />} />
       </Routes>
     </Router>
