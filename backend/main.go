@@ -496,7 +496,7 @@ func handleShellWebSocket(c echo.Context) error {
 	defer ptmx.Close()
 
 	// Execute command if provided
-	command := c.QueryParam("command")
+	command := step.Command
 	if command != "" {
 		if isCommandBlocked(command) {
 			log.Printf("Blocked command attempt: %s", command)

@@ -550,6 +550,9 @@ const EditFlowModal: React.FC<EditFlowModalProps> = ({ isOpen, onClose, onSubmit
                                                         // Edit mode
                                                         <div className="space-y-3">
                                                             <div className="grid grid-cols-2 gap-3">
+                                                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                                                                    Step Name
+                                                                </label>
                                                                 <input
                                                                     type="text"
                                                                     value={step.name}
@@ -561,6 +564,9 @@ const EditFlowModal: React.FC<EditFlowModalProps> = ({ isOpen, onClose, onSubmit
                                                                     className="px-2 py-1 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
                                                                     disabled={loading}
                                                                 />
+                                                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                                                                    Command
+                                                                </label>
                                                                 <input
                                                                     type="text"
                                                                     value={step.command}
@@ -572,6 +578,77 @@ const EditFlowModal: React.FC<EditFlowModalProps> = ({ isOpen, onClose, onSubmit
                                                                     className="px-2 py-1 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
                                                                     disabled={loading}
                                                                 />
+                                                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                                                                    Notes (Optional)
+                                                                </label>
+                                                                <textarea
+                                                                    value={step.notes}
+                                                                    onChange={(e) => {
+                                                                        const updatedSteps = [...steps];
+                                                                        updatedSteps[index] = { ...step, notes: e.target.value };
+                                                                        setSteps(updatedSteps);
+                                                                    }}
+                                                                    className="px-2 py-1 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                                                    disabled={loading}
+                                                                />
+                                                                <label className="flex items-center gap-2">
+                                                                    Auto-run
+                                                                </label>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={step.skip_prompt}
+                                                                    onChange={(e) => {
+                                                                        const updatedSteps = [...steps];
+                                                                        updatedSteps[index] = { ...step, skip_prompt: e.target.checked };
+                                                                        setSteps(updatedSteps);
+                                                                    }}
+                                                                    className="rounded border-slate-300 dark:border-slate-600"
+                                                                    disabled={loading}
+                                                                />
+                                                                <label className="flex items-center gap-2">
+                                                                    Terminal mode
+                                                                </label>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={step.terminal}
+                                                                    onChange={(e) => {
+                                                                        const updatedSteps = [...steps];
+                                                                        updatedSteps[index] = { ...step, terminal: e.target.checked };
+                                                                        setSteps(updatedSteps);
+                                                                    }}
+                                                                    className="rounded border-slate-300 dark:border-slate-600"
+                                                                    disabled={loading}
+                                                                />
+                                                                <label className="flex items-center gap-2">
+                                                                    Use Tmux Terminal
+                                                                </label>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={step.is_tmux_terminal}
+                                                                    onChange={(e) => {
+                                                                        const updatedSteps = [...steps];
+                                                                        updatedSteps[index] = { ...step, is_tmux_terminal: e.target.checked };
+                                                                        setSteps(updatedSteps);
+                                                                    }}
+                                                                    className="rounded border-slate-300 dark:border-slate-600"
+                                                                    disabled={loading}
+                                                                />
+                                                                <label className="flex items-center gap-2">
+                                                                    Tmux Session Name
+                                                                </label>
+                                                                <input
+                                                                    type="text"
+                                                                    value={step.tmux_session_name}
+                                                                    onChange={(e) => {
+                                                                        const updatedSteps = [...steps];
+                                                                        updatedSteps[index] = { ...step, tmux_session_name: e.target.value };
+                                                                        setSteps(updatedSteps);
+                                                                    }}
+                                                                    placeholder="e.g., dev-session, ${PROJECT_NAME}"
+                                                                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                                    disabled={loading}
+                                                                />
+
                                                             </div>
                                                             <div className="flex gap-2">
                                                                 <Button

@@ -18,7 +18,7 @@ interface TerminalProps {
 const Terminal: React.FC<TerminalProps> = ({ command, stepId, onDone, className }) => {
     const xtermRef = useRef<HTMLDivElement>(null);
     const termRef = useRef<XTerm>(new XTerm());
-    const wsRef = useRef<WebSocket>(new WebSocket('ws://localhost:8080/api/shell'));
+    const wsRef = useRef<WebSocket>(new WebSocket('ws://localhost:24050/api/shell'));
     const fitAddonRef = useRef<FitAddon>(new FitAddon());
     const [isConnected, setIsConnected] = useState(false);
     const [connectionStatus, setConnectionStatus] = useState('Connecting...');
@@ -71,9 +71,6 @@ const Terminal: React.FC<TerminalProps> = ({ command, stepId, onDone, className 
 
         // Build WebSocket URL with command and step_id parameters
         const params = new URLSearchParams();
-        if (command) {
-            params.append('command', command);
-        }
         if (stepId) {
             params.append('step_id', stepId.toString());
         }
