@@ -221,6 +221,9 @@ var upgrader = websocket.Upgrader{
 
 // loadConfig loads configuration from YAML file
 func loadConfig(configPath string) (*Config, error) {
+	// Get user home directory for better defaults
+	homeDir := getUserHomeDir()
+
 	// Default configuration
 	cfg := &Config{
 		Service: ServiceConfig{
@@ -231,8 +234,8 @@ func loadConfig(configPath string) (*Config, error) {
 		},
 		Data: DataConfig{
 			BaseDir:  "./data",
-			FlowsDir: "./flows",
-			LogsDir:  "./logs",
+			FlowsDir: "./data/flows",
+			LogsDir:  "./data/logs",
 			TempDir:  "./tmp",
 		},
 		Web: WebConfig{
@@ -258,13 +261,18 @@ func loadConfig(configPath string) (*Config, error) {
 		},
 		Flows: FlowsConfig{
 			LocalFlowsEnabled: true,
-			FlowsDir:          "./flows",
+			FlowsDir:          "./data/flows",
 		},
 		System: SystemConfig{
 			Shell: ShellConfig{
 				DefaultShell:  "/bin/bash",
 				Timeout:       "30m",
 				MaxConcurrent: 5,
+			},
+			Workspace: WorkspaceConfig{
+				DefaultDir:      homeDir,
+				AllowedDirs:     []string{homeDir, "/tmp", "/opt/dev-tool"},
+				AllowHomeAccess: true,
 			},
 		},
 		Database: DatabaseConfig{
@@ -281,6 +289,14 @@ func loadConfig(configPath string) (*Config, error) {
 
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return nil, fmt.Errorf("failed to parse config file: %w", err)
+		}
+	}
+
+	// Ensure data directories exist
+	dirs := []string{cfg.Data.BaseDir, cfg.Data.FlowsDir, cfg.Data.LogsDir, cfg.Data.TempDir}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("Warning: Could not create directory %s: %v", dir, err)
 		}
 	}
 
@@ -1144,11 +1160,8 @@ func setupStaticFileServer(e *echo.Echo) {
 		e.GET("/*", func(c echo.Context) error {
 			path := c.Request().URL.Path
 
-			// Don't serve index.html for API routes
-			if strings.HasPrefix(path, "/flows") ||
-				strings.HasPrefix(path, "/shell") ||
-				strings.HasPrefix(path, "/execute-command") ||
-				strings.HasPrefix(path, "/health") {
+			// Don't serve index.html for API routes (they're under /api prefix)
+			if strings.HasPrefix(path, "/api/") {
 				return echo.ErrNotFound
 			}
 
@@ -1180,9 +1193,73 @@ func setupStaticFileServer(e *echo.Echo) {
 				if staticDir == "" {
 					staticDir = "./web"
 				}
-				return c.File(filepath.Join(staticDir, "index.html"))
+				indexPath := filepath.Join(staticDir, "index.html")
+				if _, err := os.Stat(indexPath); err == nil {
+					return c.File(indexPath)
+				}
 			}
-			return echo.ErrNotFound
+
+			// Fallback HTML when no frontend files are available
+			fallbackHTML := `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevTool - Development Flow Service</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+        .status { background: #f0f8ff; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        .api-list { background: #f9f9f9; padding: 15px; border-radius: 5px; }
+        .api-endpoint { font-family: monospace; background: #e8e8e8; padding: 2px 6px; border-radius: 3px; }
+        .success { color: #28a745; }
+        .warning { color: #ffc107; }
+    </style>
+</head>
+<body>
+    <h1>🚀 DevTool v` + version + ` - Development Flow Service</h1>
+    
+    <div class="status">
+        <h2 class="success">✅ Service Running</h2>
+        <p>The DevTool backend service is running successfully!</p>
+        <p><strong>Note:</strong> Frontend files are not available. This may be because:</p>
+        <ul>
+            <li>The binary was built without embedded frontend files</li>
+            <li>The web directory is not present</li>
+            <li>This is the backend-only version</li>
+        </ul>
+    </div>
+
+    <div class="api-list">
+        <h3>📡 Available API Endpoints:</h3>
+        <ul>
+            <li><span class="api-endpoint">GET /api/health</span> - Service health check</li>
+            <li><span class="api-endpoint">GET /api/diagnostics</span> - System diagnostics</li>
+            <li><span class="api-endpoint">GET /api/flows</span> - List all flows</li>
+            <li><span class="api-endpoint">POST /api/flows</span> - Create new flow</li>
+            <li><span class="api-endpoint">POST /api/execute-step</span> - Execute flow step</li>
+            <li><span class="api-endpoint">POST /api/execute-command</span> - Execute command</li>
+            <li><span class="api-endpoint">GET /api/shell</span> - WebSocket shell connection</li>
+        </ul>
+    </div>
+
+    <div class="status">
+        <h3>🔧 Quick Test:</h3>
+        <p>Test the API with: <code>curl http://localhost:` + fmt.Sprintf("%d", config.Service.Port) + `/api/health</code></p>
+        <p>View diagnostics: <code>curl http://localhost:` + fmt.Sprintf("%d", config.Service.Port) + `/api/diagnostics</code></p>
+    </div>
+
+    <div class="status">
+        <h3>📝 Next Steps:</h3>
+        <ol>
+            <li>Use the API endpoints directly for automation</li>
+            <li>Build the full version with frontend: <code>make build</code></li>
+            <li>Check the logs: <code>journalctl -u dev-tool -f</code></li>
+        </ol>
+    </div>
+</body>
+</html>`
+
+			return c.HTML(http.StatusOK, fallbackHTML)
 		})
 	}
 
@@ -1198,9 +1275,73 @@ func setupStaticFileServer(e *echo.Echo) {
 			if staticDir == "" {
 				staticDir = "./web"
 			}
-			return c.File(filepath.Join(staticDir, "index.html"))
+			indexPath := filepath.Join(staticDir, "index.html")
+			if _, err := os.Stat(indexPath); err == nil {
+				return c.File(indexPath)
+			}
 		}
-		return echo.ErrNotFound
+
+		// Fallback HTML when no frontend files are available
+		fallbackHTML := `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevTool - Development Flow Service</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+        .status { background: #f0f8ff; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        .api-list { background: #f9f9f9; padding: 15px; border-radius: 5px; }
+        .api-endpoint { font-family: monospace; background: #e8e8e8; padding: 2px 6px; border-radius: 3px; }
+        .success { color: #28a745; }
+        .warning { color: #ffc107; }
+    </style>
+</head>
+<body>
+    <h1>🚀 DevTool v` + version + ` - Development Flow Service</h1>
+    
+    <div class="status">
+        <h2 class="success">✅ Service Running</h2>
+        <p>The DevTool backend service is running successfully!</p>
+        <p><strong>Note:</strong> Frontend files are not available. This may be because:</p>
+        <ul>
+            <li>The binary was built without embedded frontend files</li>
+            <li>The web directory is not present</li>
+            <li>This is the backend-only version</li>
+        </ul>
+    </div>
+
+    <div class="api-list">
+        <h3>📡 Available API Endpoints:</h3>
+        <ul>
+            <li><span class="api-endpoint">GET /api/health</span> - Service health check</li>
+            <li><span class="api-endpoint">GET /api/diagnostics</span> - System diagnostics</li>
+            <li><span class="api-endpoint">GET /api/flows</span> - List all flows</li>
+            <li><span class="api-endpoint">POST /api/flows</span> - Create new flow</li>
+            <li><span class="api-endpoint">POST /api/execute-step</span> - Execute flow step</li>
+            <li><span class="api-endpoint">POST /api/execute-command</span> - Execute command</li>
+            <li><span class="api-endpoint">GET /api/shell</span> - WebSocket shell connection</li>
+        </ul>
+    </div>
+
+    <div class="status">
+        <h3>🔧 Quick Test:</h3>
+        <p>Test the API with: <code>curl http://localhost:` + fmt.Sprintf("%d", config.Service.Port) + `/api/health</code></p>
+        <p>View diagnostics: <code>curl http://localhost:` + fmt.Sprintf("%d", config.Service.Port) + `/api/diagnostics</code></p>
+    </div>
+
+    <div class="status">
+        <h3>📝 Next Steps:</h3>
+        <ol>
+            <li>Use the API endpoints directly for automation</li>
+            <li>Build the full version with frontend: <code>make build</code></li>
+            <li>Check the logs: <code>journalctl -u dev-tool -f</code></li>
+        </ol>
+    </div>
+</body>
+</html>`
+
+		return c.HTML(http.StatusOK, fallbackHTML)
 	})
 }
 

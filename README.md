@@ -1,232 +1,330 @@
 # DevTool - Development Flow Service
 
-A powerful development workflow automation tool that provides interactive terminals and command execution through a modern web interface.
+A powerful development workflow automation tool that provides interactive terminals, command execution, and flow management through a modern web interface.
 
-## Features
+## 🚀 Features
 
-✅ **Interactive Terminal**: Real-time WebSocket-based shell access  
-✅ **Command Execution**: Synchronous command execution with detailed results  
-✅ **Flow Management**: YAML-based workflow definitions  
-✅ **System Service**: Runs as a systemd service with automatic startup  
-✅ **Security**: Command filtering and validation  
-✅ **Modern UI**: React-based responsive interface  
-✅ **Configuration**: YAML-based configuration management  
+- **🖥️ Interactive Terminal**: Real-time WebSocket-based shell access
+- **⚡ Command Execution**: Synchronous and asynchronous command execution
+- **📋 Flow Management**: Create, edit, and manage development workflows
+- **🔧 System Service**: Runs as a systemd service with automatic startup
+- **🛡️ Security**: Command filtering, user isolation, and resource limits
+- **🌐 Modern UI**: React-based responsive web interface
+- **📁 Database**: SQLite-based storage for flows and configurations
+- **🔄 Import/Export**: Backup and share your workflows
 
-## Quick Start
+## 📦 Quick Installation (Recommended)
+
+### Option 1: Download Pre-built Binary
+
+1. **Download the latest release**:
+```bash
+# Download the latest binary (replace with actual release URL)
+wget https://github.com/your-repo/dev-tool/releases/latest/download/dev-tool-linux-amd64 -O dev-tool
+
+# Make it executable
+chmod +x dev-tool
+```
+
+2. **Run directly** (no installation required):
+```bash
+# Run with default settings
+./dev-tool
+
+# Or with custom config
+./dev-tool --config config.yaml
+```
+
+3. **Access the web interface**:
+```
+http://localhost:24050
+```
+
+### Option 2: Install as System Service (Recommended for Production)
+
+1. **Download and install**:
+```bash
+# Download the installation script
+curl -fsSL https://raw.githubusercontent.com/your-repo/dev-tool/main/install-embedded.sh | sudo bash
+
+# Or download and inspect first
+wget https://raw.githubusercontent.com/your-repo/dev-tool/main/install-embedded.sh
+chmod +x install-embedded.sh
+sudo ./install-embedded.sh
+```
+
+2. **Check service status**:
+```bash
+sudo systemctl status dev-tool
+```
+
+3. **Access the web interface**:
+```
+http://localhost:24050
+```
+
+## 🛠️ Manual Installation
 
 ### Prerequisites
 
-- **Linux** with systemd (Ubuntu 18.04+, CentOS 7+, etc.)
-- **Go 1.19+** (for building from source)
-- **Node.js 18+** (for building frontend)
+- **Linux** with systemd (Ubuntu 18.04+, CentOS 7+, Debian 9+)
 - **sudo** access for system installation
+- **Internet connection** for downloading
 
-### Installation
+### Step-by-Step Installation
 
-1. **Download and Build**:
+1. **Create system user**:
 ```bash
-git clone <repository-url>
-cd dev-tool
-make build
+sudo useradd -r -s /bin/bash -d /home/bacancy -m bacancy
+sudo usermod -aG sudo bacancy
 ```
 
-2. **Install as System Service**:
+2. **Download the binary**:
 ```bash
-sudo make install
+# Create installation directory
+sudo mkdir -p /opt/dev-tool/bin
+
+# Download binary
+sudo wget https://github.com/your-repo/dev-tool/releases/latest/download/dev-tool-linux-amd64 \
+    -O /opt/dev-tool/bin/dev-tool
+
+# Make executable
+sudo chmod +x /opt/dev-tool/bin/dev-tool
 ```
 
-3. **Check Status**:
+3. **Create systemd service**:
 ```bash
-make status
+sudo tee /etc/systemd/system/dev-tool.service > /dev/null <<EOF
+[Unit]
+Description=DevTool - Development Flow Service
+Documentation=https://github.com/your-repo/dev-tool
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=bacancy
+Group=bacancy
+ExecStart=/opt/dev-tool/bin/dev-tool
+Restart=always
+RestartSec=10
+KillMode=mixed
+TimeoutStopSec=30
+
+# Working directory and environment
+WorkingDirectory=/home/bacancy
+Environment=HOME=/home/bacancy
+Environment=USER=bacancy
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Security settings (relaxed for development)
+PrivateTmp=false
+ProtectSystem=false
+ProtectHome=false
+NoNewPrivileges=false
+PrivateDevices=false
+ProtectKernelTunables=false
+ProtectKernelModules=false
+ProtectControlGroups=false
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryLimit=1G
+
+# Capabilities
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# File system access
+ReadWritePaths=/home /opt/dev-tool /tmp /var/tmp
+BindPaths=/home/bacancy
+
+[Install]
+WantedBy=multi-user.target
+EOF
 ```
 
-4. **Access Web Interface**:
-```
-http://localhost:8080
-```
-
-## Build Commands
-
+4. **Set up directories and permissions**:
 ```bash
-# Show all available commands
-make help
+# Create necessary directories
+sudo mkdir -p /opt/dev-tool/{bin,data,logs}
+sudo mkdir -p /home/bacancy
 
-# Development
-make setup              # Setup development environment
-make dev                # Start development servers
-make dev-backend        # Start only backend
-make dev-frontend       # Start only frontend
+# Set ownership
+sudo chown -R bacancy:bacancy /opt/dev-tool
+sudo chown -R bacancy:bacancy /home/bacancy
 
-# Building
-make build              # Build complete application
-make build-backend      # Build only Go binary
-make build-frontend     # Build only React frontend
-make package            # Create deployment package
-
-# Production
-make install            # Build and install as system service
-make uninstall          # Remove system service
-make status             # Check service status
-make logs               # View service logs
-make restart            # Restart service
-
-# Maintenance
-make clean              # Clean build artifacts
-make test               # Run tests
-make deps               # Install dependencies
+# Set permissions
+sudo chmod 755 /opt/dev-tool/bin/dev-tool
 ```
 
-## Manual Installation
-
-If you prefer manual installation or need to customize the process:
-
-1. **Build the application**:
+5. **Enable and start the service**:
 ```bash
-make build
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Enable auto-start
+sudo systemctl enable dev-tool
+
+# Start the service
+sudo systemctl start dev-tool
+
+# Check status
+sudo systemctl status dev-tool
 ```
 
-2. **Extract and install**:
-```bash
-tar -xzf dev-tool-1.0.0-linux-amd64.tar.gz
-cd dev-tool-1.0.0-linux-amd64
-sudo ./scripts/install.sh
-```
+## 🔧 Configuration
 
-## Configuration
+DevTool works out of the box with sensible defaults, but you can customize it:
 
-The service is configured via `/opt/dev-tool/config/config.yaml`:
+### Default Configuration
+
+The application uses these defaults when no config file is provided:
+- **Port**: 24050
+- **Host**: 0.0.0.0 (all interfaces)
+- **Data Directory**: `./data`
+- **Database**: `./data/flows.db`
+- **Working Directory**: User's home directory
+
+### Custom Configuration
+
+Create a `config.yaml` file:
 
 ```yaml
 service:
   name: "dev-tool"
-  port: 8080
+  port: 24050
   host: "0.0.0.0"
 
 data:
-  base_dir: "/opt/dev-tool/data"
-  flows_dir: "/opt/dev-tool/data/flows"
+  base_dir: "./data"
+  flows_dir: "./data/flows"
+  logs_dir: "./data/logs"
+  temp_dir: "./tmp"
 
 security:
   cors:
-    allowed_origins: ["http://localhost:3000", "http://localhost:8080"]
+    allowed_origins: ["*"]
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowed_headers: ["Origin", "Content-Type", "Accept", "Authorization"]
 
-flows:
-  validation:
-    blocked_commands: 
-      - "rm -rf /"
-      - "mkfs"
-      - "fdisk"
+system:
+  shell:
+    default_shell: "/bin/bash"
+    timeout: "30m"
+    max_concurrent: 5
+  workspace:
+    default_dir: "/home/bacancy"
+    allowed_dirs: ["/home/bacancy", "/tmp", "/opt/dev-tool"]
+    allow_home_access: true
+
+database:
+  path: "./data/flows.db"
 ```
 
-## Creating Flows
-
-Create YAML files in `/opt/dev-tool/data/flows/`:
-
-```yaml
-name: "My Development Flow"
-variables:
-  PROJECT_PATH: "/home/user/project"
-steps:
-  - name: "Check Status"
-    command: "git status"
-    notes: "Check git repository status"
-    terminal: false
-    
-  - name: "Interactive Shell"
-    command: "cd $PROJECT_PATH"
-    notes: "Open interactive terminal in project"
-    terminal: true
+Run with custom config:
+```bash
+./dev-tool --config config.yaml
 ```
 
-## System Service Management
+## 🎯 Usage
+
+### Web Interface
+
+1. **Open your browser** to `http://localhost:24050`
+2. **Create flows** using the web interface
+3. **Execute commands** interactively or in batch
+4. **Manage workflows** with the built-in editor
+
+### API Endpoints
+
+- `GET /api/health` - Service health check
+- `GET /api/diagnostics` - System diagnostics
+- `GET /api/flows` - List all flows
+- `POST /api/flows` - Create new flow
+- `POST /api/execute-step` - Execute flow step
+- `POST /api/execute-command` - Execute command
+- `GET /api/shell` - WebSocket shell connection
+
+### Command Line Usage
 
 ```bash
-# Service status
+# Show version
+./dev-tool --version
+
+# Show help
+./dev-tool --help
+
+# Run with custom config
+./dev-tool --config /path/to/config.yaml
+
+# Run in foreground (for debugging)
+./dev-tool
+```
+
+## 🔐 System Service Management
+
+### Service Commands
+
+```bash
+# Check service status
 sudo systemctl status dev-tool
 
 # Start/stop service
 sudo systemctl start dev-tool
 sudo systemctl stop dev-tool
+sudo systemctl restart dev-tool
 
 # Enable/disable auto-start
 sudo systemctl enable dev-tool
 sudo systemctl disable dev-tool
 
 # View logs
-journalctl -u dev-tool -f
+sudo journalctl -u dev-tool -f
 
-# Restart service
-sudo systemctl restart dev-tool
+# View recent logs
+sudo journalctl -u dev-tool -n 100
+
+# Follow logs in real-time
+sudo journalctl -u dev-tool -f --since "1 hour ago"
 ```
 
-## Directory Structure
+### Log Management
+
+```bash
+# View application logs
+sudo journalctl -u dev-tool
+
+# View logs with timestamps
+sudo journalctl -u dev-tool -o short-iso
+
+# Export logs to file
+sudo journalctl -u dev-tool > dev-tool.log
+
+# Clear old logs
+sudo journalctl --vacuum-time=7d
+```
+
+## 📁 Directory Structure
 
 ```
 /opt/dev-tool/
 ├── bin/
-│   └── dev-tool                 # Main binary
-├── config/
-│   └── config.yaml             # Configuration file
-├── data/
-│   ├── flows/                  # Flow definitions
-│   └── logs/                   # Application logs
-├── web/                        # Frontend assets
-└── tmp/                        # Temporary files
+│   └── dev-tool           # Main binary
+└── data/                  # Created automatically
+    ├── flows.db          # SQLite database
+    ├── flows/            # Flow definitions
+    ├── logs/             # Application logs
+    └── tmp/              # Temporary files
+
+/home/bacancy/            # Service user home
+├── .bashrc
+├── .profile
+└── projects/             # Your development projects
 ```
 
-## API Endpoints
-
-- `GET /health` - Health check
-- `GET /flows` - List available flows
-- `GET /shell` - WebSocket terminal connection
-- `POST /execute-command` - Execute command synchronously
-
-## Development
-
-### Local Development
-
-1. **Setup environment**:
-```bash
-make setup
-```
-
-2. **Start development servers**:
-```bash
-make dev
-```
-
-3. **Access application**:
-   - Frontend: http://localhost:3000
-   - Backend: http://localhost:8080
-
-### Project Structure
-
-```
-dev-tool/
-├── backend/           # Go backend
-│   ├── main.go       # Main application
-│   ├── flows/        # Sample flows
-│   ├── go.mod        # Go dependencies
-│   └── go.sum
-├── frontend/          # React frontend
-│   ├── src/          # Source code
-│   ├── package.json  # Node dependencies
-│   └── dist/         # Built assets
-├── config.yaml       # Configuration
-├── install.sh        # Installation script
-├── Makefile          # Build system
-└── README.md
-```
-
-## Security
-
-- **Command Filtering**: Dangerous commands are blocked by default
-- **System User**: Runs as dedicated `devtool` user
-- **Resource Limits**: Memory and CPU limits via systemd
-- **File Permissions**: Restricted access to system directories
-- **CORS**: Configurable cross-origin restrictions
-
-## Troubleshooting
+## 🔍 Troubleshooting
 
 ### Service Won't Start
 
@@ -235,54 +333,176 @@ dev-tool/
 sudo systemctl status dev-tool
 
 # View detailed logs
-journalctl -u dev-tool -n 50
+sudo journalctl -u dev-tool -n 50
 
-# Check configuration
-/opt/dev-tool/bin/dev-tool --config /opt/dev-tool/config/config.yaml --help
+# Check if port is in use
+sudo netstat -tlnp | grep :24050
+
+# Test binary directly
+sudo -u bacancy /opt/dev-tool/bin/dev-tool --help
 ```
 
 ### Permission Issues
 
 ```bash
 # Fix ownership
-sudo chown -R devtool:devtool /opt/dev-tool/data
+sudo chown -R bacancy:bacancy /opt/dev-tool
+sudo chown -R bacancy:bacancy /home/bacancy
 
 # Check service user
-id devtool
+id bacancy
+
+# Test file access
+sudo -u bacancy touch /home/bacancy/test-file
 ```
 
-### Port Already in Use
+### Configuration Issues
 
 ```bash
-# Check what's using port 8080
-sudo netstat -tlnp | grep :8080
+# Test configuration
+sudo -u bacancy /opt/dev-tool/bin/dev-tool --config /path/to/config.yaml --help
 
-# Change port in config.yaml
-sudo nano /opt/dev-tool/config/config.yaml
-sudo systemctl restart dev-tool
+# Check configuration syntax
+yaml-lint config.yaml
 ```
 
-## Uninstallation
+### Network Issues
 
 ```bash
-# Using Makefile
-make uninstall
+# Check if service is listening
+sudo netstat -tlnp | grep dev-tool
 
-# Manual removal
+# Test local connection
+curl http://localhost:24050/api/health
+
+# Check firewall
+sudo ufw status
+```
+
+## 🗑️ Uninstallation
+
+### Complete Removal
+
+```bash
+# Stop and disable service
 sudo systemctl stop dev-tool
 sudo systemctl disable dev-tool
+
+# Remove service file
 sudo rm /etc/systemd/system/dev-tool.service
+
+# Remove application directory
 sudo rm -rf /opt/dev-tool
-sudo userdel devtool
+
+# Remove service user (optional)
+sudo userdel -r bacancy
+
+# Reload systemd
+sudo systemctl daemon-reload
 ```
 
-## Support
+### Keep Data (Partial Removal)
 
-- **Logs**: `journalctl -u dev-tool -f`
-- **Status**: `make status`
-- **Configuration**: `/opt/dev-tool/config/config.yaml`
-- **Data Directory**: `/opt/dev-tool/data/`
+```bash
+# Stop and disable service
+sudo systemctl stop dev-tool
+sudo systemctl disable dev-tool
 
-## License
+# Remove service file and binary only
+sudo rm /etc/systemd/system/dev-tool.service
+sudo rm /opt/dev-tool/bin/dev-tool
+
+# Keep /opt/dev-tool/data for later use
+```
+
+## 🔒 Security Considerations
+
+### Default Security Features
+
+- **Dedicated User**: Runs as `bacancy` user with limited privileges
+- **Resource Limits**: Memory and process limits via systemd
+- **Command Filtering**: Dangerous commands can be blocked
+- **CORS Protection**: Configurable cross-origin restrictions
+- **File System Access**: Controlled access to directories
+
+### Hardening (Optional)
+
+For production environments, consider:
+
+```bash
+# Restrict network access
+sudo ufw allow 24050/tcp
+sudo ufw enable
+
+# Monitor service
+sudo systemctl edit dev-tool
+# Add monitoring and alerting
+
+# Regular updates
+# Set up automatic updates for the binary
+```
+
+## 🏗️ Building from Source
+
+If you want to build from source:
+
+```bash
+# Prerequisites
+sudo apt update
+sudo apt install -y git golang-go nodejs npm
+
+# Clone and build
+git clone https://github.com/your-repo/dev-tool.git
+cd dev-tool
+make build
+
+# Install
+sudo make install
+```
+
+## 📊 Monitoring
+
+### Health Checks
+
+```bash
+# API health check
+curl http://localhost:24050/api/health
+
+# System diagnostics
+curl http://localhost:24050/api/diagnostics
+
+# Service status
+systemctl is-active dev-tool
+```
+
+### Performance Monitoring
+
+```bash
+# Resource usage
+sudo systemctl show dev-tool --property=MemoryCurrent,CPUUsageNSec
+
+# Process information
+ps aux | grep dev-tool
+
+# Network connections
+sudo netstat -tlnp | grep dev-tool
+```
+
+## 🤝 Support
+
+- **Logs**: `sudo journalctl -u dev-tool -f`
+- **Health Check**: `curl http://localhost:24050/api/health`
+- **Diagnostics**: `curl http://localhost:24050/api/diagnostics`
+- **Service Status**: `sudo systemctl status dev-tool`
+
+## 📄 License
 
 MIT License - see LICENSE file for details.
+
+---
+
+**Quick Start Summary:**
+1. Download: `wget <binary-url> -O dev-tool && chmod +x dev-tool`
+2. Run: `./dev-tool`
+3. Open: `http://localhost:24050`
+4. For system service: `curl -fsSL <install-script-url> | sudo bash`
